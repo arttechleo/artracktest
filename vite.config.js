@@ -1,7 +1,13 @@
-import { defineConfig } from 'vite';
+import { defineConfig } from 'vite'
 
 export default defineConfig({
+  root: '.',
   build: {
     target: 'esnext',
-  },
-});
+    outDir: 'dist',
+    emptyOutDir: true,
+    rollupOptions: {
+      input: { main: './index.html' }
+    }
+  }
+})
