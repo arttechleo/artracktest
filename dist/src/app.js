@@ -55,7 +55,7 @@ renderer.setAnimationLoop(() => {
   if (centroidLocked) {
     // Position frozen — only spin
     cube.rotation.y += 0.01;
-  } else if (visibleSet.size >= 1 && visibleSet.has(0)) {
+  } else if (visibleSet.size >= 1) {
     // First valid detection — compute centroid once and lock
     _centroidW.set(0, 0, 0);
     visibleSet.forEach(i => {
@@ -66,6 +66,12 @@ renderer.setAnimationLoop(() => {
     cube.position.copy(_centroidW);
     cube.visible = true;
     centroidLocked = true;
+    console.log('CENTROID LOCKED', JSON.stringify({
+      x: _centroidW.x.toFixed(3),
+      y: _centroidW.y.toFixed(3),
+      z: _centroidW.z.toFixed(3),
+      visibleCount: visibleSet.size
+    }));
   }
   renderer.render(scene, camera);
 });
