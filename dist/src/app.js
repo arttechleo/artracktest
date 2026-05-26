@@ -36,14 +36,14 @@ hint.textContent = '👀 Point camera at the other images';
 document.body.appendChild(hint);
 
 const visibleSet = new Set();
-let dirty = false;
 let placed = false;
+let pendingUpdate = false;
 const _wp = new THREE.Vector3();
 const _cw = new THREE.Vector3();
 
 anchors.forEach((anchor, i) => {
-  anchor.onTargetFound = () => { visibleSet.add(i);    dirty = true; };
-  anchor.onTargetLost  = () => { visibleSet.delete(i); dirty = true; };
+  anchor.onTargetFound = () => { visibleSet.add(i);    pendingUpdate = true; };
+  anchor.onTargetLost  = () => { visibleSet.delete(i); pendingUpdate = true; };
 });
 
 window.addEventListener('error', e => {
@@ -53,40 +53,32 @@ window.addEventListener('error', e => {
 await mindarThree.start();
 
 renderer.setAnimationLoop(() => {
-  if (dirty) {
-    dirty = false;
+  if (pendingUpdate) {
+    pendingUpdate = false;
     const count = visibleSet.size;
 
-    if (count === 0) {
-      cube.visible = false;
-      placed = false;
-      hint.style.display = 'none';
-
-    } else if (count >= 2) {
-      // Recompute centroid once on detection change
+    if (count >= 2) {
       _cw.set(0, 0, 0);
       visibleSet.forEach(i => {
         anchors[i].group.getWorldPosition(_wp);
         _cw.add(_wp);
       });
       _cw.divideScalar(count);
-
       const hostIdx = Math.min(...visibleSet);
       anchors[hostIdx].group.add(cube);
       anchors[hostIdx].group.updateWorldMatrix(true, false);
       anchors[hostIdx].group.worldToLocal(_cw);
       cube.position.copy(_cw);
       scene.attach(cube);
-      cube.visible = true;
       placed = true;
-      hint.style.display = 'none';
-
-    } else {
-      // count === 1
-      cube.visible = placed;
-      hint.style.display = 'block';
+    } else if (count === 0) {
+      placed = false;
     }
   }
+
+  // Always show once placed — hide only when nothing detected
+  cube.visible = placed;
+  hint.style.display = (placed && visibleSet.size === 1) ? 'block' : 'none';
 
   cube.rotation.y += 0.01;
   renderer.render(scene, camera);
