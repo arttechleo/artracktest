@@ -1,6 +1,22 @@
 import * as THREE from 'three';
 import { MindARThree } from 'https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js';
 
+// ─── STAGE LAYOUT ────────────────────────────────────────────────────────────
+// Define physical positions of each image on stage in meters.
+// These ratios are what matter — scale is derived dynamically from camera.
+// Example: equilateral triangle, 1m sides.
+// Adjust X/Z to match your actual stage layout.
+const VIRTUAL_POSITIONS = [
+  new THREE.Vector3(-0.5, 0,  0),     // Image 0: front-left
+  new THREE.Vector3( 0.5, 0,  0),     // Image 1: front-right
+  new THREE.Vector3( 0,   0,  0.866), // Image 2: back-center
+];
+
+const VIRTUAL_CENTROID = VIRTUAL_POSITIONS
+  .reduce((acc, p) => acc.add(p), new THREE.Vector3())
+  .divideScalar(3);
+// ─────────────────────────────────────────────────────────────────────────────
+
 const mindarThree = new MindARThree({
   container: document.querySelector('#ar-container'),
   imageTargetSrc: '/targets.mind',
@@ -21,16 +37,14 @@ const anchors = [];
 
 for (let i = 0; i < 3; i++) {
   const anchor = mindarThree.addAnchor(i);
-  // Debug marker on each anchor — confirms per-image tracking works
-  const marker = new THREE.Mesh(
-    new THREE.SphereGeometry(0.04),
+  // Small debug marker per anchor
+  anchor.group.add(new THREE.Mesh(
+    new THREE.SphereGeometry(0.03),
     new THREE.MeshStandardMaterial({ color: COLORS[i] })
-  );
-  anchor.group.add(marker);
+  ));
   anchors.push(anchor);
 }
 
-// Centroid cube — scene-level, not anchor child
 const cube = new THREE.Mesh(
   new THREE.BoxGeometry(0.12, 0.12, 0.12),
   new THREE.MeshStandardMaterial({ color: 0xffffff, metalness: 0.3, roughness: 0.4 })
@@ -39,20 +53,70 @@ cube.visible = false;
 scene.add(cube);
 
 const visibleSet = new Set();
-const _pos = new THREE.Vector3();
-const _centroid = new THREE.Vector3();
 
 anchors.forEach((anchor, i) => {
-  anchor.onTargetFound = () => {
-    console.log(`target ${i} found`);
-    visibleSet.add(i);
-  };
-  anchor.onTargetLost = () => {
-    console.log(`target ${i} lost`);
-    visibleSet.delete(i);
-    if (visibleSet.size < 1) cube.visible = false;
-  };
+  anchor.onTargetFound = () => { console.log(`target ${i} found`); visibleSet.add(i); };
+  anchor.onTargetLost  = () => { console.log(`target ${i} lost`);  visibleSet.delete(i); };
 });
+
+// Pre-allocated vectors — zero GC pressure
+const _p0c = new THREE.Vector3();
+const _p1c = new THREE.Vector3();
+const _dirV = new THREE.Vector3();
+const _dirC = new THREE.Vector3();
+const _quat = new THREE.Quaternion();
+const _result = new THREE.Vector3();
+
+function computeCentroid() {
+  const ids = [...visibleSet];
+
+  if (ids.length === 0) return null;
+
+  // 3 detected: direct average, most accurate
+  if (ids.length === 3) {
+    _result.set(0, 0, 0);
+    ids.forEach(i => {
+      anchors[i].group.getWorldPosition(_p0c);
+      _result.add(_p0c);
+    });
+    return _result.divideScalar(3);
+  }
+
+  // 2 detected: solve rigid transform from virtual layout → camera space
+  if (ids.length === 2) {
+    anchors[ids[0]].group.getWorldPosition(_p0c);
+    anchors[ids[1]].group.getWorldPosition(_p1c);
+
+    const vp0 = VIRTUAL_POSITIONS[ids[0]];
+    const vp1 = VIRTUAL_POSITIONS[ids[1]];
+
+    const distC = _p0c.distanceTo(_p1c);
+    const distV = vp0.distanceTo(vp1);
+    if (distV < 0.0001) return null;
+    const scale = distC / distV;
+
+    _dirV.subVectors(vp1, vp0).normalize();
+    _dirC.subVectors(_p1c, _p0c).normalize();
+    _quat.setFromUnitVectors(_dirV, _dirC);
+
+    // T = p0_c - R(s * vp0)
+    _result.copy(vp0).applyQuaternion(_quat).multiplyScalar(scale);
+    const tx = _p0c.x - _result.x;
+    const ty = _p0c.y - _result.y;
+    const tz = _p0c.z - _result.z;
+
+    // Apply transform to full-triangle centroid
+    _result.copy(VIRTUAL_CENTROID)
+      .applyQuaternion(_quat)
+      .multiplyScalar(scale);
+    _result.x += tx; _result.y += ty; _result.z += tz;
+    return _result;
+  }
+
+  // 1 detected: fallback, show at anchor
+  anchors[ids[0]].group.getWorldPosition(_result);
+  return _result;
+}
 
 window.addEventListener('error', (e) => {
   if (e.message && e.message.includes('getProjectionMatrix')) e.preventDefault();
@@ -61,16 +125,13 @@ window.addEventListener('error', (e) => {
 await mindarThree.start();
 
 renderer.setAnimationLoop(() => {
-  if (visibleSet.size >= 1) {
-    _centroid.set(0, 0, 0);
-    visibleSet.forEach(i => {
-      anchors[i].group.getWorldPosition(_pos);
-      _centroid.add(_pos);
-    });
-    _centroid.divideScalar(visibleSet.size);
-    cube.position.copy(_centroid);
+  const centroid = computeCentroid();
+  if (centroid) {
+    cube.position.copy(centroid);
     cube.visible = true;
     cube.rotation.y += 0.01;
+  } else {
+    cube.visible = false;
   }
   renderer.render(scene, camera);
 });
