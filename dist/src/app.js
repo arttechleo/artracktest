@@ -36,14 +36,14 @@ hint.textContent = '👀 Point camera at the other images';
 document.body.appendChild(hint);
 
 const visibleSet = new Set();
+let dirty = false;
 let placed = false;
-let prevVisibleKey = '';
 const _wp = new THREE.Vector3();
 const _cw = new THREE.Vector3();
 
 anchors.forEach((anchor, i) => {
-  anchor.onTargetFound = () => visibleSet.add(i);
-  anchor.onTargetLost  = () => visibleSet.delete(i);
+  anchor.onTargetFound = () => { visibleSet.add(i);    dirty = true; };
+  anchor.onTargetLost  = () => { visibleSet.delete(i); dirty = true; };
 });
 
 window.addEventListener('error', e => {
@@ -53,29 +53,24 @@ window.addEventListener('error', e => {
 await mindarThree.start();
 
 renderer.setAnimationLoop(() => {
-  const count = visibleSet.size;
+  if (dirty) {
+    dirty = false;
+    const count = visibleSet.size;
 
-  // Detect any change in which images are visible
-  const visibleKey = [...visibleSet].sort().join(',');
-  if (visibleKey !== prevVisibleKey) {
-    placed = false;
-    prevVisibleKey = visibleKey;
-  }
+    if (count === 0) {
+      cube.visible = false;
+      placed = false;
+      hint.style.display = 'none';
 
-  if (count === 0) {
-    cube.visible = false;
-    hint.style.display = 'none';
+    } else if (count >= 2) {
+      // Recompute centroid once on detection change
+      _cw.set(0, 0, 0);
+      visibleSet.forEach(i => {
+        anchors[i].group.getWorldPosition(_wp);
+        _cw.add(_wp);
+      });
+      _cw.divideScalar(count);
 
-  } else if (count >= 2) {
-    _cw.set(0, 0, 0);
-    visibleSet.forEach(i => {
-      anchors[i].group.getWorldPosition(_wp);
-      _cw.add(_wp);
-    });
-    _cw.divideScalar(count);
-
-    if (!placed) {
-      // Snap to new centroid immediately on detection change
       const hostIdx = Math.min(...visibleSet);
       anchors[hostIdx].group.add(cube);
       anchors[hostIdx].group.updateWorldMatrix(true, false);
@@ -84,14 +79,13 @@ renderer.setAnimationLoop(() => {
       scene.attach(cube);
       cube.visible = true;
       placed = true;
-    } else {
-      cube.position.lerp(_cw, 0.08);
-    }
-    hint.style.display = 'none';
+      hint.style.display = 'none';
 
-  } else {
-    cube.visible = placed;
-    hint.style.display = 'block';
+    } else {
+      // count === 1
+      cube.visible = placed;
+      hint.style.display = 'block';
+    }
   }
 
   cube.rotation.y += 0.01;
