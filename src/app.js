@@ -38,9 +38,10 @@ cube.visible = false;
 anchors[0].group.add(cube);
 
 const visibleSet = new Set();
+let centroidLocked = false;
 anchors.forEach((anchor, i) => {
   anchor.onTargetFound = () => { visibleSet.add(i); };
-  anchor.onTargetLost  = () => { visibleSet.delete(i); if (!visibleSet.size) cube.visible = false; };
+  anchor.onTargetLost  = () => { visibleSet.delete(i); if (!visibleSet.size) { cube.visible = false; centroidLocked = false; } };
 });
 
 const _worldPos  = new THREE.Vector3();
@@ -55,7 +56,7 @@ window.addEventListener('error', (e) => {
 await mindarThree.start();
 
 renderer.setAnimationLoop(() => {
-  if (visibleSet.size >= 1 && visibleSet.has(0)) {
+  if (!centroidLocked && visibleSet.size >= 1 && visibleSet.has(0)) {
     // Compute world-space centroid of all visible anchors
     _centroidW.set(0, 0, 0);
     visibleSet.forEach(i => {
@@ -73,6 +74,7 @@ renderer.setAnimationLoop(() => {
     cube.position.copy(_centroidW);
     cube.visible = true;
     cube.rotation.y += 0.01;
+    centroidLocked = true;
   } else if (visibleSet.size >= 1) {
     // anchor[0] not visible — fall back to showing at first visible anchor
     const firstId = [...visibleSet][0];
