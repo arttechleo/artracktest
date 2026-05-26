@@ -10,40 +10,30 @@ const mindarThree = new MindARThree({
 const { renderer, scene, camera } = mindarThree;
 scene.background = null;
 renderer.setClearColor(0x000000, 0);
-
 scene.add(new THREE.AmbientLight(0xffffff, 0.8));
-const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
-dirLight.position.set(1, 2, 3);
-scene.add(dirLight);
 
 const COLORS = [0x00ff88, 0xff4444, 0x4488ff];
 const anchors = [];
-
 for (let i = 0; i < 3; i++) {
   const anchor = mindarThree.addAnchor(i);
   anchor.group.add(new THREE.Mesh(
-    new THREE.SphereGeometry(0.03),
-    new THREE.MeshStandardMaterial({ color: COLORS[i] })
+    new THREE.SphereGeometry(0.1),
+    new THREE.MeshBasicMaterial({ color: COLORS[i] })
   ));
   anchors.push(anchor);
 }
 
 const cube = new THREE.Mesh(
-  new THREE.BoxGeometry(0.5, 0.5, 0.5),
-  new THREE.MeshBasicMaterial({ color: 0xff0000 })
+  new THREE.BoxGeometry(1, 1, 1),
+  new THREE.MeshBasicMaterial({ color: 0xffffff })
 );
 cube.visible = false;
-scene.add(cube);
 
 const visibleSet = new Set();
-let centroidLocked = false;
 anchors.forEach((anchor, i) => {
-  anchor.onTargetFound = () => { visibleSet.add(i); };
-  anchor.onTargetLost  = () => { visibleSet.delete(i); if (!visibleSet.size) { cube.visible = false; centroidLocked = false; } };
+  anchor.onTargetFound = () => visibleSet.add(i);
+  anchor.onTargetLost  = () => visibleSet.delete(i);
 });
-
-const _worldPos  = new THREE.Vector3();
-const _centroidW = new THREE.Vector3();
 
 window.addEventListener('error', (e) => {
   if (e.message && e.message.includes('getProjectionMatrix')) e.preventDefault();
@@ -51,36 +41,21 @@ window.addEventListener('error', (e) => {
 
 await mindarThree.start();
 
+// Add cube to same parent as anchors after start
+anchors[0].group.parent.add(cube);
+
+const _avg = new THREE.Vector3();
+
 renderer.setAnimationLoop(() => {
-  if (centroidLocked) {
-    // Position frozen — only spin
-    cube.rotation.y += 0.01;
-  } else if (visibleSet.size >= 1) {
-    // First valid detection — compute centroid once and lock
-    _centroidW.set(0, 0, 0);
-    const ids = [...visibleSet];
-    const anchorPositions = {};
-    ids.forEach(i => {
-      anchors[i].group.getWorldPosition(_worldPos);
-      anchorPositions[i] = {x:_worldPos.x.toFixed(3),y:_worldPos.y.toFixed(3),z:_worldPos.z.toFixed(3)};
-      _centroidW.add(_worldPos);
-    });
-    _centroidW.divideScalar(ids.length);
-
-    // Scale cube relative to inter-anchor distance so it works in any coordinate space
-    if (ids.length >= 2) {
-      const d = anchors[ids[0]].group.position.distanceTo(anchors[ids[1]].group.position);
-      cube.scale.setScalar(d * 0.4);
-    }
-
-    cube.position.copy(_centroidW);
+  if (visibleSet.size >= 1) {
+    _avg.set(0, 0, 0);
+    visibleSet.forEach(i => _avg.add(anchors[i].group.position));
+    _avg.divideScalar(visibleSet.size);
+    cube.position.copy(_avg);
     cube.visible = true;
-    centroidLocked = true;
-    console.log('CENTROID LOCKED', JSON.stringify({
-      centroid: {x:_centroidW.x.toFixed(3),y:_centroidW.y.toFixed(3),z:_centroidW.z.toFixed(3)},
-      anchors: anchorPositions,
-      visibleCount: ids.length
-    }));
+    cube.rotation.y += 0.01;
+  } else {
+    cube.visible = false;
   }
   renderer.render(scene, camera);
 });
