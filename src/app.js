@@ -28,14 +28,12 @@ for (let i = 0; i < 3; i++) {
   anchors.push(anchor);
 }
 
-// Centroid cube parented to anchor[0]'s group —
-// position is set relative to anchor[0] each frame
 const cube = new THREE.Mesh(
   new THREE.BoxGeometry(0.12, 0.12, 0.12),
   new THREE.MeshStandardMaterial({ color: 0xffffff, metalness: 0.3, roughness: 0.4 })
 );
 cube.visible = false;
-anchors[0].group.add(cube);
+scene.add(cube);
 
 const visibleSet = new Set();
 let centroidLocked = false;
@@ -46,7 +44,6 @@ anchors.forEach((anchor, i) => {
 
 const _worldPos  = new THREE.Vector3();
 const _centroidW = new THREE.Vector3();
-const _invMat = new THREE.Matrix4();
 
 window.addEventListener('error', (e) => {
   if (e.message && e.message.includes('getProjectionMatrix')) e.preventDefault();
@@ -66,8 +63,6 @@ renderer.setAnimationLoop(() => {
       _centroidW.add(_worldPos);
     });
     _centroidW.divideScalar(visibleSet.size);
-    _invMat.copy(anchors[0].group.matrixWorld).invert();
-    _centroidW.applyMatrix4(_invMat);
     cube.position.copy(_centroidW);
     cube.visible = true;
     centroidLocked = true;
