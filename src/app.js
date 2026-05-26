@@ -58,20 +58,28 @@ renderer.setAnimationLoop(() => {
   } else if (visibleSet.size >= 1) {
     // First valid detection — compute centroid once and lock
     _centroidW.set(0, 0, 0);
+    const ids = [...visibleSet];
     const anchorPositions = {};
-    visibleSet.forEach(i => {
+    ids.forEach(i => {
       anchors[i].group.getWorldPosition(_worldPos);
       anchorPositions[i] = {x:_worldPos.x.toFixed(3),y:_worldPos.y.toFixed(3),z:_worldPos.z.toFixed(3)};
       _centroidW.add(_worldPos);
     });
-    _centroidW.divideScalar(visibleSet.size);
+    _centroidW.divideScalar(ids.length);
+
+    // Scale cube relative to inter-anchor distance so it works in any coordinate space
+    if (ids.length >= 2) {
+      const d = anchors[ids[0]].group.position.distanceTo(anchors[ids[1]].group.position);
+      cube.scale.setScalar(d * 0.4);
+    }
+
     cube.position.copy(_centroidW);
     cube.visible = true;
     centroidLocked = true;
     console.log('CENTROID LOCKED', JSON.stringify({
       centroid: {x:_centroidW.x.toFixed(3),y:_centroidW.y.toFixed(3),z:_centroidW.z.toFixed(3)},
       anchors: anchorPositions,
-      visibleCount: visibleSet.size
+      visibleCount: ids.length
     }));
   }
   renderer.render(scene, camera);
