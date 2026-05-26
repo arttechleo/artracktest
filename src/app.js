@@ -40,8 +40,7 @@ hint.textContent = '👀 Point camera at the other images';
 document.body.appendChild(hint);
 
 const visibleSet = new Set();
-let locked  = false;
-let hostIdx = -1;
+let locked = false;
 const _wp = new THREE.Vector3();
 const _cw = new THREE.Vector3();
 
@@ -60,17 +59,14 @@ renderer.setAnimationLoop(() => {
   const count = visibleSet.size;
 
   if (count === 0) {
-    // All lost — full reset
     locked = false;
-    hostIdx = -1;
     cube.visible = false;
     hint.style.display = 'none';
 
   } else if (!locked && count >= 2) {
-    // First good read — compute centroid once and lock
-    const newHost = Math.min(...visibleSet);
-    anchors[newHost].group.add(cube);
-    hostIdx = newHost;
+    // Compute centroid in anchor local space
+    const hostIdx = Math.min(...visibleSet);
+    anchors[hostIdx].group.add(cube);
 
     _cw.set(0, 0, 0);
     visibleSet.forEach(i => {
@@ -81,27 +77,19 @@ renderer.setAnimationLoop(() => {
     anchors[hostIdx].group.updateWorldMatrix(true, false);
     anchors[hostIdx].group.worldToLocal(_cw);
     cube.position.copy(_cw);
+
+    // Detach to scene — preserves world transform, severs anchor dependency
+    scene.attach(cube);
     cube.visible = true;
     locked = true;
     hint.style.display = 'none';
 
   } else if (locked) {
-    // Locked — never recompute position
-    // If host anchor was lost, silently reparent to preserve world position
-    if (!visibleSet.has(hostIdx)) {
-      const newHost = Math.min(...visibleSet);
-      cube.getWorldPosition(_wp);
-      anchors[newHost].group.add(cube);
-      anchors[newHost].group.updateWorldMatrix(true, false);
-      anchors[newHost].group.worldToLocal(_wp);
-      cube.position.copy(_wp);
-      hostIdx = newHost;
-    }
     cube.visible = true;
     hint.style.display = count === 1 ? 'block' : 'none';
 
   } else {
-    // 1 visible, never reached lock threshold yet
+    // 1 visible, not yet locked
     hint.style.display = 'block';
   }
 
