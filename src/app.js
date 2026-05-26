@@ -45,7 +45,6 @@ anchors.forEach((anchor, i) => {
 });
 
 const _worldPos  = new THREE.Vector3();
-const _anchor0W  = new THREE.Vector3();
 const _centroidW = new THREE.Vector3();
 const _invMat = new THREE.Matrix4();
 
@@ -56,35 +55,22 @@ window.addEventListener('error', (e) => {
 await mindarThree.start();
 
 renderer.setAnimationLoop(() => {
-  if (!centroidLocked && visibleSet.size >= 1 && visibleSet.has(0)) {
-    // Compute world-space centroid of all visible anchors
+  if (centroidLocked) {
+    // Position frozen — only spin
+    cube.rotation.y += 0.01;
+  } else if (visibleSet.size >= 1 && visibleSet.has(0)) {
+    // First valid detection — compute centroid once and lock
     _centroidW.set(0, 0, 0);
     visibleSet.forEach(i => {
       anchors[i].group.getWorldPosition(_worldPos);
       _centroidW.add(_worldPos);
     });
     _centroidW.divideScalar(visibleSet.size);
-
-    // Convert centroid back to anchor[0] local space
-    anchors[0].group.getWorldPosition(_anchor0W);
-    const worldMat = anchors[0].group.matrixWorld;
-    _invMat.copy(worldMat).invert();
+    _invMat.copy(anchors[0].group.matrixWorld).invert();
     _centroidW.applyMatrix4(_invMat);
-
     cube.position.copy(_centroidW);
     cube.visible = true;
-    cube.rotation.y += 0.01;
     centroidLocked = true;
-  } else if (visibleSet.size >= 1) {
-    // anchor[0] not visible — fall back to showing at first visible anchor
-    const firstId = [...visibleSet][0];
-    anchors[firstId].group.add(cube);
-    cube.position.set(0, 0, 0);
-    cube.visible = true;
-    cube.rotation.y += 0.01;
-  } else {
-    cube.visible = false;
   }
-
   renderer.render(scene, camera);
 });
