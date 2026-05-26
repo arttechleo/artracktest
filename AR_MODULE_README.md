@@ -1,104 +1,106 @@
 # AR Image Tracking Module
-## Drop-in WebAR anchor for the Root project
+## Plug-and-play WebAR spatial anchor for Root / apps/audience-ar
 
-### What this does
-Detects up to 3 image targets via phone camera and places a 3D object
-at the spatial centroid of detected images. Works on iOS Safari and Android Chrome.
-No app install required — pure WebAR via mind-ar.js.
-
-### File structure
-ar-cube-tracker/
-├── dist/               ← deploy this folder to any static host
-│   ├── index.html      ← entry point
-│   ├── src/app.js      ← all AR logic (edit this to swap the 3D model)
-│   └── targets.mind    ← compiled image tracking data
-├── trackimages/        ← source tracking images (Image1-3.jpg)
-├── compile-targets.js  ← recompile targets.mind if images change
-└── build.js            ← cross-platform build script
+### Overview
+Detects up to 3 image targets via phone camera and places a 3D model
+at the spatial centroid of detected images. Works on iOS Safari and
+Android Chrome. No app install — pure WebAR via mind-ar.js.
 
 ---
 
-## Replacing the cube with the Pluto 3D model
+## Swapping the cube for the Pluto model
 
-### Step 1 — Add your model file
-Place your Pluto .glb or .gltf file in:
-  ar-cube-tracker/public/pluto.glb
+The Pluto GLB already exists in the Root repo at:
+  apps/audience-ar/public/models/PlutoRig_Mixamo.glb   ← recommended (rigged)
+  apps/audience-ar/public/models/PlutoRig_Mixamo_v2.glb
+  apps/audience-ar/public/models/pluto16.glb            ← static fallback
 
-### Step 2 — Edit src/app.js
+### Edit src/app.js — two changes only
 
-FIND this block (around line 10):
-  import * as THREE from 'three';
+1. Add GLTFLoader import directly below the THREE import (line 2):
+   import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.150.0/examples/jsm/loaders/GLTFLoader.js';
 
-ADD below it:
-  import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.150.0/examples/jsm/loaders/GLTFLoader.js';
+2. Replace the cube block:
 
-FIND this block:
-  const cube = new THREE.Mesh(
-    new THREE.BoxGeometry(0.2, 0.2, 0.2),
-    new THREE.MeshBasicMaterial({ color: 0x00ccff, transparent: true, opacity: 0.85 })
-  );
-  cube.add(new THREE.LineSegments(
-    new THREE.EdgesGeometry(new THREE.BoxGeometry(0.2, 0.2, 0.2)),
-    new THREE.LineBasicMaterial({ color: 0xffffff })
-  ));
-  cube.visible = false;
+   REMOVE:
+     const cube = new THREE.Mesh(
+       new THREE.BoxGeometry(0.2, 0.2, 0.2),
+       new THREE.MeshBasicMaterial({ color: 0x00ccff, transparent: true, opacity: 0.85 })
+     );
+     cube.add(new THREE.LineSegments(
+       new THREE.EdgesGeometry(new THREE.BoxGeometry(0.2, 0.2, 0.2)),
+       new THREE.LineBasicMaterial({ color: 0xffffff })
+     ));
+     cube.visible = false;
 
-REPLACE with:
-  const cube = new THREE.Group(); // container — same variable name, no other changes needed
-  cube.visible = false;
-  const loader = new GLTFLoader();
-  loader.load('/pluto.glb', (gltf) => {
-    const model = gltf.scene;
-    model.scale.setScalar(0.15); // adjust scale to taste
-    cube.add(model);
-  });
+   REPLACE WITH:
+     const cube = new THREE.Group();
+     cube.visible = false;
+     let mixer = null;
 
-That is the only change required. All placement, tracking, and camera
-update logic remains identical.
+     new GLTFLoader().load('/models/PlutoRig_Mixamo.glb', (gltf) => {
+       const model = gltf.scene;
+       model.scale.setScalar(0.15); // tweak to match physical image size
+       cube.add(model);
 
-### Step 3 — Rebuild and deploy
-  node build.js
-  git add -f . && git commit -m "feat: swap cube for Pluto model" && git push
+       // Play first animation clip if rigged model has one
+       if (gltf.animations.length > 0) {
+         mixer = new THREE.AnimationMixer(model);
+         mixer.clipAction(gltf.animations[0]).play();
+       }
+     });
+
+3. Add mixer update inside the animation loop, just before renderer.render:
+   if (mixer) mixer.update(0.016); // ~60fps tick
+
+No other changes. All tracking, placement, and camera update logic is unchanged.
 
 ---
 
-## Integrating into the Root project
+## Integrating into apps/audience-ar
 
-### Option A — iframe embed (zero conflict, recommended)
-Add to any Root page:
+### Option A — iframe (zero dependency conflict, recommended for monorepo)
+Add to any audience-ar page:
   <iframe
-    src="https://your-ar-module.onrender.com"
-    style="width:100%;height:100vh;border:none;"
-    allow="camera"
+    src="https://artracktest.onrender.com"
+    style="position:fixed;inset:0;width:100%;height:100%;border:none;z-index:999;"
+    allow="camera;microphone"
   ></iframe>
 
-The `allow="camera"` attribute is required for WebAR on iOS.
+`allow="camera"` is required — iOS Safari blocks camera in iframes without it.
 
-### Option B — direct file merge
-1. Copy dist/src/app.js → root project as /ar/app.js
-2. Copy dist/targets.mind → root project as /public/targets.mind
-3. Copy the <script type="importmap"> block and <script type="module" src="/ar/app.js">
-   into the Root page that should trigger AR
-4. Ensure the Root page has a <div id="ar-container"> filling the viewport
+### Option B — direct merge into apps/audience-ar
+1. Copy dist/src/app.js     → apps/audience-ar/src/ar-tracker.js
+2. Copy dist/targets.mind   → apps/audience-ar/public/targets.mind
+3. The Pluto models are already at public/models/ — no copy needed
+4. In the audience-ar entry HTML, add before </body>:
+     <div id="ar-container" style="position:fixed;inset:0;z-index:10;"></div>
+     <script type="importmap">
+     {
+       "imports": {
+         "three": "https://cdn.jsdelivr.net/npm/three@0.150.0/build/three.module.js",
+         "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.150.0/examples/jsm/"
+       }
+     }
+     </script>
+     <script type="module" src="/src/ar-tracker.js"></script>
 
-### Recompiling tracking targets
-If tracking images change:
+### Model path inside audience-ar
+After merge, update the GLTFLoader path in ar-tracker.js:
+  '/models/PlutoRig_Mixamo.glb'   (already correct if using Option B)
+
+---
+
+## Recompiling tracking targets
+If image targets change, from ar-cube-tracker/:
   node compile-targets.js
   node build.js
-Requires Node.js 18+. Run from ar-cube-tracker/ root.
 
-### Tracking image requirements
-- Minimum 300 DPI when printed
-- High contrast, asymmetric composition (no repeated patterns)
-- Avoid plain text or QR codes as sole content
-- Physical print size used during compile = expected real-world size
+Requires Node 18+. Source images are in trackimages/.
 
 ---
 
 ## Deployment
-Deployed on Render.com as a static site.
-Build command : npm run build
-Publish dir   : dist
-URL           : https://artracktest.onrender.com
-
-To redeploy: git push — Render auto-deploys on push.
+AR module: https://artracktest.onrender.com
+Auto-deploys on push to arttechleo/artracktest master.
+Build: npm run build  |  Publish dir: dist
