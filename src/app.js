@@ -29,8 +29,8 @@ for (let i = 0; i < 3; i++) {
 }
 
 const cube = new THREE.Mesh(
-  new THREE.BoxGeometry(0.12, 0.12, 0.12),
-  new THREE.MeshStandardMaterial({ color: 0xffffff, metalness: 0.3, roughness: 0.4 })
+  new THREE.BoxGeometry(0.5, 0.5, 0.5),
+  new THREE.MeshBasicMaterial({ color: 0xff0000 })
 );
 cube.visible = false;
 scene.add(cube);
@@ -58,8 +58,10 @@ renderer.setAnimationLoop(() => {
   } else if (visibleSet.size >= 1) {
     // First valid detection — compute centroid once and lock
     _centroidW.set(0, 0, 0);
+    const anchorPositions = {};
     visibleSet.forEach(i => {
       anchors[i].group.getWorldPosition(_worldPos);
+      anchorPositions[i] = {x:_worldPos.x.toFixed(3),y:_worldPos.y.toFixed(3),z:_worldPos.z.toFixed(3)};
       _centroidW.add(_worldPos);
     });
     _centroidW.divideScalar(visibleSet.size);
@@ -67,9 +69,8 @@ renderer.setAnimationLoop(() => {
     cube.visible = true;
     centroidLocked = true;
     console.log('CENTROID LOCKED', JSON.stringify({
-      x: _centroidW.x.toFixed(3),
-      y: _centroidW.y.toFixed(3),
-      z: _centroidW.z.toFixed(3),
+      centroid: {x:_centroidW.x.toFixed(3),y:_centroidW.y.toFixed(3),z:_centroidW.z.toFixed(3)},
+      anchors: anchorPositions,
       visibleCount: visibleSet.size
     }));
   }
