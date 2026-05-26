@@ -37,13 +37,27 @@ document.body.appendChild(hint);
 
 const visibleSet = new Set();
 let placed = false;
-let pendingUpdate = false;
+let hideTimeout = null;
 const _wp = new THREE.Vector3();
 const _cw = new THREE.Vector3();
 
 anchors.forEach((anchor, i) => {
-  anchor.onTargetFound = () => { visibleSet.add(i);    pendingUpdate = true; };
-  anchor.onTargetLost  = () => { visibleSet.delete(i); pendingUpdate = true; };
+  anchor.onTargetFound = () => {
+    visibleSet.add(i);
+    // Cancel any pending hide
+    if (hideTimeout) { clearTimeout(hideTimeout); hideTimeout = null; }
+  };
+  anchor.onTargetLost = () => {
+    visibleSet.delete(i);
+    // Only start hide timer when ALL images lost, give 2s grace for tracking blips
+    if (visibleSet.size === 0 && placed) {
+      hideTimeout = setTimeout(() => {
+        placed = false;
+        cube.visible = false;
+        hint.style.display = 'none';
+      }, 2000);
+    }
+  };
 });
 
 window.addEventListener('error', e => {
@@ -53,17 +67,19 @@ window.addEventListener('error', e => {
 await mindarThree.start();
 
 renderer.setAnimationLoop(() => {
-  if (pendingUpdate) {
-    pendingUpdate = false;
-    const count = visibleSet.size;
+  const count = visibleSet.size;
 
-    if (count >= 2) {
-      _cw.set(0, 0, 0);
-      visibleSet.forEach(i => {
-        anchors[i].group.getWorldPosition(_wp);
-        _cw.add(_wp);
-      });
-      _cw.divideScalar(count);
+  if (count >= 1) {
+    // Always recompute centroid from whatever is currently visible
+    _cw.set(0, 0, 0);
+    visibleSet.forEach(i => {
+      anchors[i].group.getWorldPosition(_wp);
+      _cw.add(_wp);
+    });
+    _cw.divideScalar(count);
+
+    if (!placed) {
+      // First placement: use anchor local space for correct scale, then detach to scene
       const hostIdx = Math.min(...visibleSet);
       anchors[hostIdx].group.add(cube);
       anchors[hostIdx].group.updateWorldMatrix(true, false);
@@ -71,14 +87,14 @@ renderer.setAnimationLoop(() => {
       cube.position.copy(_cw);
       scene.attach(cube);
       placed = true;
-    } else if (count === 0) {
-      placed = false;
+    } else {
+      // Per-frame lerp in world space — follows camera movement continuously
+      cube.position.lerp(_cw, 0.12);
     }
-  }
 
-  // Always show once placed — hide only when nothing detected
-  cube.visible = placed;
-  hint.style.display = (placed && visibleSet.size === 1) ? 'block' : 'none';
+    cube.visible = true;
+    hint.style.display = count === 1 ? 'block' : 'none';
+  }
 
   cube.rotation.y += 0.01;
   renderer.render(scene, camera);
