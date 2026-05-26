@@ -1,5 +1,5 @@
-const { MindARThree } = window.MINDAR.IMAGE;
-const THREE = window.THREE;
+import * as THREE from 'three';
+import { MindARThree } from 'https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js';
 
 const TARGET_SIZES = [0.1300, 0.1300, 0.1300];
 const COLORS = [0x00ff88, 0xff4444, 0x4488ff];
@@ -26,6 +26,5 @@ for (let i = 0; i < 3; i++) {
   anchor.group.add(mesh);
 }
 
-mindarThree.start().then(() => {
-  renderer.setAnimationLoop(() => renderer.render(scene, camera));
-});
+await mindarThree.start();
+renderer.setAnimationLoop(() => renderer.render(scene, camera));

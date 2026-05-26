@@ -12,8 +12,13 @@
   </head>
   <body>
     <div id="ar-container"></div>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.150.0/build/three.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js"></script>
+    <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.150.0/build/three.module.js"
+      }
+    }
+    </script>
     <script type="module" src="/src/app.js"></script>
   </body>
 </html>
