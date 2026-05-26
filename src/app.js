@@ -24,15 +24,15 @@ for (let i = 0; i < 3; i++) {
 }
 
 const cube = new THREE.Mesh(
-  new THREE.BoxGeometry(1, 1, 1),
-  new THREE.MeshBasicMaterial({ color: 0xffffff })
+  new THREE.BoxGeometry(0.3, 0.3, 0.3),
+  new THREE.MeshBasicMaterial({ color: 0xffffff, wireframe: true })
 );
 cube.visible = false;
 
 const visibleSet = new Set();
 anchors.forEach((anchor, i) => {
   anchor.onTargetFound = () => visibleSet.add(i);
-  anchor.onTargetLost  = () => visibleSet.delete(i);
+  anchor.onTargetLost  = () => { visibleSet.delete(i); };
 });
 
 window.addEventListener('error', (e) => {
@@ -41,21 +41,38 @@ window.addEventListener('error', (e) => {
 
 await mindarThree.start();
 
-// Add cube to same parent as anchors after start
-anchors[0].group.parent.add(cube);
-
-const _avg = new THREE.Vector3();
+const _wp   = new THREE.Vector3();
+const _cw   = new THREE.Vector3();
+let hostIdx = -1;
 
 renderer.setAnimationLoop(() => {
-  if (visibleSet.size >= 1) {
-    _avg.set(0, 0, 0);
-    visibleSet.forEach(i => _avg.add(anchors[i].group.position));
-    _avg.divideScalar(visibleSet.size);
-    cube.position.copy(_avg);
-    cube.visible = true;
-    cube.rotation.y += 0.01;
-  } else {
+  if (visibleSet.size < 1) {
     cube.visible = false;
+    hostIdx = -1;
+    renderer.render(scene, camera);
+    return;
   }
+
+  // Pick lowest visible anchor as host — reparent cube if host changed
+  const newHost = Math.min(...visibleSet);
+  if (newHost !== hostIdx) {
+    anchors[newHost].group.add(cube);
+    hostIdx = newHost;
+  }
+
+  // World-space centroid of all visible anchors
+  _cw.set(0, 0, 0);
+  visibleSet.forEach(i => {
+    anchors[i].group.getWorldPosition(_wp);
+    _cw.add(_wp);
+  });
+  _cw.divideScalar(visibleSet.size);
+
+  // Convert world centroid → host anchor local space
+  anchors[hostIdx].group.worldToLocal(_cw);
+  cube.position.copy(_cw);
+  cube.visible = true;
+  cube.rotation.y += 0.01;
+
   renderer.render(scene, camera);
 });
