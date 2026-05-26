@@ -8,9 +8,12 @@ const mindarThree = new MindARThree({
   container: document.querySelector('#ar-container'),
   imageTargetSrc: '/targets.mind',
   maxTrack: 3,
+  rendererOptions: { alpha: true }
 });
 
 const { renderer, scene, camera } = mindarThree;
+
+renderer.setClearColor(0x000000, 0);
 
 scene.add(new THREE.AmbientLight(0xffffff, 0.8));
 const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
