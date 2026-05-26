@@ -46,6 +46,7 @@ anchors.forEach((anchor, i) => {
 const _worldPos  = new THREE.Vector3();
 const _anchor0W  = new THREE.Vector3();
 const _centroidW = new THREE.Vector3();
+const _invMat = new THREE.Matrix4();
 
 window.addEventListener('error', (e) => {
   if (e.message && e.message.includes('getProjectionMatrix')) e.preventDefault();
@@ -66,8 +67,8 @@ renderer.setAnimationLoop(() => {
     // Convert centroid back to anchor[0] local space
     anchors[0].group.getWorldPosition(_anchor0W);
     const worldMat = anchors[0].group.matrixWorld;
-    const invMat = new THREE.Matrix4().copy(worldMat).invert();
-    _centroidW.applyMatrix4(invMat);
+    _invMat.copy(worldMat).invert();
+    _centroidW.applyMatrix4(_invMat);
 
     cube.position.copy(_centroidW);
     cube.visible = true;
