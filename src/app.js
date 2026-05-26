@@ -12,19 +12,16 @@ scene.background = null;
 renderer.setClearColor(0x000000, 0);
 scene.add(new THREE.AmbientLight(0xffffff, 1));
 
-// No debug spheres — placement confirmed working
 const anchors = Array.from({ length: 3 }, (_, i) => mindarThree.addAnchor(i));
 
-// Cube with edges for clear visibility at any scale
 const cube = new THREE.Mesh(
   new THREE.BoxGeometry(0.2, 0.2, 0.2),
   new THREE.MeshBasicMaterial({ color: 0x00ccff, transparent: true, opacity: 0.85 })
 );
-const edges = new THREE.LineSegments(
+cube.add(new THREE.LineSegments(
   new THREE.EdgesGeometry(new THREE.BoxGeometry(0.2, 0.2, 0.2)),
   new THREE.LineBasicMaterial({ color: 0xffffff })
-);
-cube.add(edges);
+));
 cube.visible = false;
 
 const hint = document.createElement('div');
@@ -40,6 +37,7 @@ document.body.appendChild(hint);
 
 const visibleSet = new Set();
 let placed = false;
+let prevVisibleKey = '';
 const _wp = new THREE.Vector3();
 const _cw = new THREE.Vector3();
 
@@ -57,8 +55,14 @@ await mindarThree.start();
 renderer.setAnimationLoop(() => {
   const count = visibleSet.size;
 
-  if (count === 0) {
+  // Detect any change in which images are visible
+  const visibleKey = [...visibleSet].sort().join(',');
+  if (visibleKey !== prevVisibleKey) {
     placed = false;
+    prevVisibleKey = visibleKey;
+  }
+
+  if (count === 0) {
     cube.visible = false;
     hint.style.display = 'none';
 
@@ -71,6 +75,7 @@ renderer.setAnimationLoop(() => {
     _cw.divideScalar(count);
 
     if (!placed) {
+      // Snap to new centroid immediately on detection change
       const hostIdx = Math.min(...visibleSet);
       anchors[hostIdx].group.add(cube);
       anchors[hostIdx].group.updateWorldMatrix(true, false);
@@ -80,7 +85,7 @@ renderer.setAnimationLoop(() => {
       cube.visible = true;
       placed = true;
     } else {
-      cube.position.lerp(_cw, 0.05);
+      cube.position.lerp(_cw, 0.08);
     }
     hint.style.display = 'none';
 
