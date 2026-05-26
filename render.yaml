@@ -2,6 +2,5 @@ services:
   - type: web
     name: ar-cube-tracker
     env: static
-    buildCommand: npm install; npm run build
-    staticPublishPath: ./dist
-
+    buildCommand: npm run build
+    staticPublishPath: dist
