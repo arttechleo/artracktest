@@ -8,11 +8,11 @@ const mindarThree = new MindARThree({
   container: document.querySelector('#ar-container'),
   imageTargetSrc: '/targets.mind',
   maxTrack: 3,
-  rendererOptions: { alpha: true }
 });
 
 const { renderer, scene, camera } = mindarThree;
 
+scene.background = null;
 renderer.setClearColor(0x000000, 0);
 
 scene.add(new THREE.AmbientLight(0xffffff, 0.8));
@@ -28,6 +28,10 @@ for (let i = 0; i < 3; i++) {
   );
   anchor.group.add(mesh);
 }
+
+window.addEventListener('error', (e) => {
+  if (e.message && e.message.includes('getProjectionMatrix')) e.preventDefault();
+}, true);
 
 await mindarThree.start();
 renderer.setAnimationLoop(() => renderer.render(scene, camera));
