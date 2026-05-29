@@ -1,0 +1,1 @@
+{"root":["./src/app.tsx","./src/main.tsx","./src/components/hud.tsx","./src/components/judgmentpanel.tsx","./src/hooks/userelaysocket.ts","./src/hooks/useshowstate.ts","./src/shaders/chapelenvironment.ts","./src/shaders/ghostaura.ts","./src/types/xr8.d.ts","./src/utils/chapelscene.ts","./src/utils/ghostavatar.ts","./src/utils/stageanchor.ts"],"errors":true,"version":"5.9.3"}

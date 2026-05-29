@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: root-relay
+    runtime: node
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: ROOT_AUTH_TOKEN
+        value: root-theater-2026

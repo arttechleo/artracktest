@@ -1,0 +1,78 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1 &3967849510934503041
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 7241973527758224526}
+  - component: {fileID: 1851236699094550496}
+  m_Layer: 0
+  m_Name: KinectActorVisualizer
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &7241973527758224526
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 3967849510934503041}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 1, z: 0, w: 0}
+  m_LocalPosition: {x: 0, y: 1.25, z: 3.5}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 180, z: 0}
+--- !u!114 &1851236699094550496
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 3967849510934503041}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 125a33341627447559f273ef58016fe0, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  actor1Color: {r: 0, g: 1, b: 0.5, a: 0.8}
+  actor2Color: {r: 1, g: 0.5, b: 0, a: 0.8}
+  actor3Color: {r: 0.4, g: 0.7, b: 1, a: 0.8}
+  maxActors: 3
+  showBodyCapsules: 0
+  showStickFigures: 1
+  skeletonRenderQueue: 4100
+  skeletonSortingOrder: 100
+  jointRadius: 0.075
+  boneLineWidth: 0.045
+  markerHeight: 2
+  markerRadius: 0.15
+  actorTimeoutSeconds: 1.5
+  useTransformAsStageAnchor: 1
+  applyFallbackPlacementWhenAtOrigin: 0
+  useFixedWorldPlacement: 1
+  detachFromParentForWorldPlacement: 1
+  worldBoardPosition: {x: 0, y: 1.25, z: 3.5}
+  worldBoardEulerAngles: {x: 0, y: 180, z: 0}
+  worldActorSpacing: 0.95
+  cameraDebugDepthScale: 0.02
+  skeletonScale: 1
+  flattenSkeletonDepth: 0
+  useDebugActorSlots: 0
+  kinectOriginOffset: {x: 0, y: 0, z: 0}
+  kinectYawDegrees: 0
+  kinectScale: 1
+  actor1Name: Eris
+  actor2Name: Officiant
+  actor3Name: Actor 3
+  showBoneDebugText: 0
+  debugTextWorldOffset: {x: -1.35, y: 0.95, z: 0}

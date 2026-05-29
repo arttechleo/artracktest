@@ -1,0 +1,12 @@
+<linker>
+  <!-- Preserve Newtonsoft JSON (used for serialization) -->
+  <assembly fullname="Newtonsoft.Json" preserve="all"/>
+
+  <!-- Preserve Meta Movement SDK -->
+  <assembly fullname="Meta.XR.Movement" preserve="all"/>
+
+  <!-- Preserve .NET WebSocket classes (used by RetargetStreamer) -->
+  <assembly fullname="System" preserve="all"/>
+  <assembly fullname="System.Net.WebSockets" preserve="all"/>
+  <assembly fullname="System.Net.WebSockets.Client" preserve="all"/>
+</linker>
