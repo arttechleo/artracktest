@@ -10,7 +10,7 @@ import { MindARThree } from 'https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/min
 const mindarThree = new MindARThree({
   container: document.querySelector('#ar-container'),
   imageTargetSrc: '/targets.mind',
-  maxTrack: 4,
+  maxTrack: 1,
   filterMinCF: 0.00001,
   filterBeta: 0.0001,
   missTolerance: 50,
@@ -28,7 +28,7 @@ const keyLight = new THREE.DirectionalLight(0xffffff, 1.2);
 keyLight.position.set(0, 2, 4);
 scene.add(keyLight);
 
-const anchors = Array.from({ length: 4 }, (_, i) => mindarThree.addAnchor(i));
+const anchors = Array.from({ length: 1 }, (_, i) => mindarThree.addAnchor(i));
 
 function makeCube(color, size) {
   const g = new THREE.Group();
