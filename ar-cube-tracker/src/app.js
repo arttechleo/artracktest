@@ -6,10 +6,10 @@ const mindarThree = new MindARThree({
   container: document.querySelector('#ar-container'),
   imageTargetSrc: '/targets.mind',
   maxTrack: 4,
-  filterMinCF: 0.0001,
-  filterBeta: 0.001,
-  missTolerance: 8,
-  warmupTolerance: 2,
+  filterMinCF: 0.00001,   // maximum sensitivity for distance detection
+  filterBeta: 0.0001,
+  missTolerance: 20,       // hold tracking longer through brief occlusion
+  warmupTolerance: 1,      // confirm detection on first valid frame
 });
 
 const { renderer, scene, camera } = mindarThree;
@@ -50,32 +50,33 @@ Object.assign(hint.style, {
 hint.textContent = '📷 Point camera at the panels';
 document.body.appendChild(hint);
 
-const visibleSet = new Set();
-let hostIdx = -1;
-let hideTimeout = null;
+let hostIdx  = -1;
+let prevKey  = '';
+const _wp    = new THREE.Vector3();
+const _cw    = new THREE.Vector3();
 
-const _wp = new THREE.Vector3();
-const _cw = new THREE.Vector3();
-
-
-function updatePlacement() {
-  if (visibleSet.size === 0) return;
+function updatePlacement(visibleSet) {
+  if (visibleSet.size === 0) {
+    centerCube.visible = false;
+    edgeCube.visible   = false;
+    hostIdx = -1;
+    hint.style.display = 'block';
+    return;
+  }
 
   const newHost = Math.min(...visibleSet);
 
+  if (newHost !== hostIdx) {
+    anchors[newHost].group.add(centerCube);
+    anchors[newHost].group.add(edgeCube);
+    hostIdx = newHost;
+  }
+
   if (visibleSet.size === 1) {
-    // Single panel: both cubes on the detected panel
-    if (newHost !== hostIdx) {
-      anchors[newHost].group.add(centerCube);
-      anchors[newHost].group.add(edgeCube);
-      hostIdx = newHost;
-    }
     centerCube.position.set(0,    0.1, 0);
     edgeCube.position.set(  0.55, 0.1, 0);
-
   } else {
-    // Multiple panels: compute centroid in world space,
-    // convert to host-local, place cubes there — they follow host anchor
+    // World-space centroid → host-local
     _cw.set(0, 0, 0);
     visibleSet.forEach(i => {
       anchors[i].group.getWorldPosition(_wp);
@@ -83,19 +84,12 @@ function updatePlacement() {
     });
     _cw.divideScalar(visibleSet.size);
 
-    if (newHost !== hostIdx) {
-      anchors[newHost].group.add(centerCube);
-      anchors[newHost].group.add(edgeCube);
-      hostIdx = newHost;
-    }
-
-    // Convert world centroid to host-local space — cubes stay anchored to panel
     anchors[hostIdx].group.updateWorldMatrix(true, false);
-    const localCenter = _cw.clone();
-    anchors[hostIdx].group.worldToLocal(localCenter);
+    const lc = _cw.clone();
+    anchors[hostIdx].group.worldToLocal(lc);
 
-    centerCube.position.copy(localCenter);
-    edgeCube.position.copy(localCenter);
+    centerCube.position.copy(lc);
+    edgeCube.position.copy(lc);
     edgeCube.position.x += 0.5;
   }
 
@@ -104,28 +98,6 @@ function updatePlacement() {
   hint.style.display = 'none';
 }
 
-anchors.forEach((anchor, i) => {
-  anchor.onTargetFound = () => {
-    visibleSet.add(i);
-    if (hideTimeout) { clearTimeout(hideTimeout); hideTimeout = null; }
-    updatePlacement();
-  };
-  anchor.onTargetLost = () => {
-    visibleSet.delete(i);
-    if (visibleSet.size === 0) {
-      hideTimeout = setTimeout(() => {
-        centerCube.visible = false;
-        edgeCube.visible   = false;
-        hostIdx = -1;
-        hint.style.display = 'block';
-        hideTimeout = null;
-      }, 2000);
-    } else {
-      updatePlacement(); // recompute with remaining visible panels
-    }
-  };
-});
-
 window.addEventListener('error', e => {
   if (e.message?.includes('getProjectionMatrix')) e.preventDefault();
 }, true);
@@ -133,9 +105,23 @@ window.addEventListener('error', e => {
 await mindarThree.start();
 
 renderer.setAnimationLoop(() => {
+  // Per-frame visibility check — updates on every camera movement
+  const visibleSet = new Set();
+  anchors.forEach((anchor, i) => {
+    if (anchor.group.visible) visibleSet.add(i);
+  });
+
+  // Only recompute placement when visibility changes
+  const key = [...visibleSet].sort().join(',');
+  if (key !== prevKey) {
+    prevKey = key;
+    updatePlacement(visibleSet);
+  }
+
   if (centerCube.visible) {
     centerCube.rotation.y += 0.01;
     edgeCube.rotation.y   -= 0.01;
   }
+
   renderer.render(scene, camera);
 });
