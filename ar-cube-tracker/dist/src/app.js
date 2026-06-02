@@ -38,8 +38,6 @@ const centerCube = makeCube(0x00ccff, 0.10);
 const edgeCube   = makeCube(0xff6600, 0.08);
 centerCube.visible = false;
 edgeCube.visible   = false;
-scene.add(centerCube);
-scene.add(edgeCube);
 
 const hint = document.createElement('div');
 Object.assign(hint.style, {
@@ -53,67 +51,85 @@ hint.textContent = '📷 Point camera at the panels';
 document.body.appendChild(hint);
 
 const visibleSet = new Set();
-let placed = false;
+let hostIdx = -1;
 let hideTimeout = null;
-let pendingUpdate = false;
+
 const _wp = new THREE.Vector3();
 const _cw = new THREE.Vector3();
 
-anchors.forEach((anchor, i) => {
-  anchor.onTargetFound = () => {
-    visibleSet.add(i);
-    if (hideTimeout) { clearTimeout(hideTimeout); hideTimeout = null; }
-    pendingUpdate = true;
-  };
-  anchor.onTargetLost = () => {
-    visibleSet.delete(i);
-    pendingUpdate = true;
-    if (visibleSet.size === 0 && placed) {
-      hideTimeout = setTimeout(() => {
-        placed = false;
-        centerCube.visible = false;
-        edgeCube.visible   = false;
-        hint.style.display = 'block';
-      }, 2000);
-    }
-  };
-});
+function attach(cube, hostGroup, localPos) {
+  hostGroup.add(cube);
+  cube.position.copy(localPos);
+  cube.visible = true;
+}
 
 function updatePlacement() {
   if (visibleSet.size === 0) return;
 
-  _cw.set(0, 0, 0);
-  visibleSet.forEach(i => {
-    anchors[i].group.getWorldPosition(_wp);
-    _cw.add(_wp);
-  });
-  _cw.divideScalar(visibleSet.size);
+  const newHost = Math.min(...visibleSet);
 
-  if (!placed) {
-    const hostIdx = Math.min(...visibleSet);
-    anchors[hostIdx].group.add(centerCube);
-    anchors[hostIdx].group.add(edgeCube);
-    anchors[hostIdx].group.updateWorldMatrix(true, false);
+  if (visibleSet.size === 1) {
+    // Single panel: both cubes on the detected panel
+    if (newHost !== hostIdx) {
+      anchors[newHost].group.add(centerCube);
+      anchors[newHost].group.add(edgeCube);
+      hostIdx = newHost;
+    }
+    centerCube.position.set(0,    0.1, 0);
+    edgeCube.position.set(  0.55, 0.1, 0);
 
-    const lc = _cw.clone();
-    anchors[hostIdx].group.worldToLocal(lc);
-    centerCube.position.set(0, 0, 0);
-
-    edgeCube.position.set(0.6, 0, 0);
-
-    scene.attach(centerCube);
-    scene.attach(edgeCube);
-    placed = true;
   } else {
-    centerCube.position.lerp(_cw, 0.1);
-    _wp.copy(_cw); _wp.x += 0.5;
-    edgeCube.position.lerp(_wp, 0.1);
+    // Multiple panels: compute centroid in world space,
+    // convert to host-local, place cubes there — they follow host anchor
+    _cw.set(0, 0, 0);
+    visibleSet.forEach(i => {
+      anchors[i].group.getWorldPosition(_wp);
+      _cw.add(_wp);
+    });
+    _cw.divideScalar(visibleSet.size);
+
+    if (newHost !== hostIdx) {
+      anchors[newHost].group.add(centerCube);
+      anchors[newHost].group.add(edgeCube);
+      hostIdx = newHost;
+    }
+
+    // Convert world centroid to host-local space — cubes stay anchored to panel
+    anchors[hostIdx].group.updateWorldMatrix(true, false);
+    const localCenter = _cw.clone();
+    anchors[hostIdx].group.worldToLocal(localCenter);
+
+    centerCube.position.copy(localCenter);
+    edgeCube.position.copy(localCenter);
+    edgeCube.position.x += 0.5;
   }
 
   centerCube.visible = true;
   edgeCube.visible   = true;
   hint.style.display = 'none';
 }
+
+anchors.forEach((anchor, i) => {
+  anchor.onTargetFound = () => {
+    visibleSet.add(i);
+    if (hideTimeout) { clearTimeout(hideTimeout); hideTimeout = null; }
+    updatePlacement();
+  };
+  anchor.onTargetLost = () => {
+    visibleSet.delete(i);
+    if (visibleSet.size === 0) {
+      hideTimeout = setTimeout(() => {
+        centerCube.visible = false;
+        edgeCube.visible   = false;
+        hostIdx = -1;
+        hint.style.display = 'block';
+        hideTimeout = null;
+      }, 2000);
+    } else {
+      updatePlacement(); // recompute with remaining visible panels
+    }
+  };
+});
 
 window.addEventListener('error', e => {
   if (e.message?.includes('getProjectionMatrix')) e.preventDefault();
@@ -122,8 +138,7 @@ window.addEventListener('error', e => {
 await mindarThree.start();
 
 renderer.setAnimationLoop(() => {
-  if (pendingUpdate) { pendingUpdate = false; updatePlacement(); }
-  if (placed) {
+  if (centerCube.visible) {
     centerCube.rotation.y += 0.01;
     edgeCube.rotation.y   -= 0.01;
   }
