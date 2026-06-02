@@ -91,16 +91,16 @@ function place() {
   anchors[currentHost].group.worldToLocal(_c);
 
   // Three cubes — distinct positions, all float toward camera
-  CUBE_A.position.set(_c.x - 0.12 * U, _c.y + 0.18 * U, _c.z + FLOAT);
-  CUBE_B.position.set(_c.x + 0.12 * U, _c.y + 0.18 * U, _c.z + FLOAT);
-  CUBE_C.position.set(_c.x,             _c.y - 0.10 * U, _c.z + FLOAT);
+  CUBE_A.position.set(_c.x - 0.6 * U, _c.y + 0.3 * U, _c.z + FLOAT);
+  CUBE_B.position.set(_c.x + 0.6 * U, _c.y + 0.3 * U, _c.z + FLOAT);
+  CUBE_C.position.set(_c.x,             _c.y - 0.5 * U, _c.z + FLOAT);
 
   CUBE_A.visible = true;
   CUBE_B.visible = true;
   CUBE_C.visible = true;
 
   hint.style.display = visibleSet.size < 2 ? 'block' : 'none';
-  hint.textContent   = '👀 Find more panels for accurate placement';
+  hint.textContent = `👀 ${visibleSet.size}/4 panels — indices: ${[...visibleSet].join(',')}`;
 }
 
 const hint = document.createElement('div');
