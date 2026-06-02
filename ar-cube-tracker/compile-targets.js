@@ -1,51 +1,44 @@
 import { OfflineCompiler } from 'mind-ar/src/image-target/offline-compiler.js';
 import { loadImage } from '@napi-rs/canvas';
-import { writeFileSync, mkdirSync, readdirSync } from 'fs';
-import { dirname, join, extname } from 'path';
-import { fileURLToPath } from 'url';
+import { writeFileSync, mkdirSync, readdirSync, statSync } from 'fs';
+import { join, extname } from 'path';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
+const EXTS = ['.jpg', '.jpeg', '.png'];
 
-const IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.webp']);
-
-function getTrackImages() {
-  const dir = join(__dirname, 'trackimages');
-  return readdirSync(dir)
-    .filter(f => IMAGE_EXTS.has(extname(f).toLowerCase()))
-    .sort()
-    .map(f => join('trackimages', f));
+function collectImages(dir) {
+  const results = [];
+  for (const entry of readdirSync(dir)) {
+    const full = join(dir, entry);
+    if (statSync(full).isDirectory()) {
+      results.push(...collectImages(full)); // recurse into day/ night/
+    } else if (EXTS.includes(extname(entry).toLowerCase())) {
+      results.push(full);
+    }
+  }
+  return results;
 }
 
-async function main() {
-  const imagePaths = getTrackImages();
-  if (imagePaths.length === 0) {
-    console.error('No images found in trackimages/');
-    process.exit(1);
-  }
+const imagePaths = collectImages('trackimages');
+console.log(`Found ${imagePaths.length} images across all subfolders:`);
+imagePaths.forEach(p => console.log(' ', p));
 
-  console.log(`Loading ${imagePaths.length} image(s)...`);
-  const images = [];
-  for (let i = 0; i < imagePaths.length; i++) {
-    const img = await loadImage(imagePaths[i]);
-    images.push(img);
-    console.log(`  [${i + 1}] ${imagePaths[i]} — ${img.width}x${img.height}`);
-  }
+const compiler = new OfflineCompiler();
+const images = [];
 
-  const compiler = new OfflineCompiler();
-
-  console.log('Compiling targets...');
-  await compiler.compileImageTargets(images, (progress) => {
-    process.stdout.write(`\r  Progress: ${progress.toFixed(1)}%   `);
-  });
-  console.log('\nExporting...');
-
-  const buffer = compiler.exportData();
-  mkdirSync('public', { recursive: true });
-  writeFileSync('public/targets.mind', Buffer.from(buffer));
-  console.log('Done → public/targets.mind');
+for (const p of imagePaths) {
+  const img = await loadImage(p);
+  images.push(img);
+  console.log(`Loaded: ${p} (${img.width}x${img.height})`);
 }
 
-main().catch((e) => {
-  console.error('ERROR:', e.message);
-  process.exit(1);
+console.log('\nCompiling targets — this may take a few minutes...');
+await compiler.compileImageTargets(images, (progress) => {
+  process.stdout.write(`\r  Progress: ${progress.toFixed(1)}%   `);
 });
+
+console.log('\nExporting...');
+mkdirSync('public', { recursive: true });
+writeFileSync('public/targets.mind', Buffer.from(compiler.exportData()));
+console.log(`Done → public/targets.mind  (${imagePaths.length} targets)`);
+console.log('\nTarget index map:');
+imagePaths.forEach((p, i) => console.log(`  [${i}] ${p}`));
