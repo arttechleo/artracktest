@@ -59,7 +59,9 @@ CUBE_B.visible = false;
 
 let currentHost = -1;
 const visibleSet = new Set();
-let needsUpdate  = false;  // only recompute when visibility changes
+
+const _p = new THREE.Vector3();
+const _c = new THREE.Vector3();
 
 function place() {
   if (visibleSet.size === 0) {
@@ -79,8 +81,7 @@ function place() {
     currentHost = hostIdx;
   }
 
-  const _p = new THREE.Vector3();
-  const _c = new THREE.Vector3();
+  _c.set(0, 0, 0);
   visibleSet.forEach(i => {
     _p.setFromMatrixPosition(anchors[i].group.matrixWorld);
     _c.add(_p);
@@ -118,11 +119,9 @@ document.body.appendChild(hint);
 anchors.forEach((anchor, i) => {
   anchor.onTargetFound = () => {
     visibleSet.add(i);
-    needsUpdate = true;     // panel entered view → recompute next frame
   };
   anchor.onTargetLost = () => {
     visibleSet.delete(i);
-    needsUpdate = true;     // panel left view → recompute next frame
   };
 });
 
@@ -133,10 +132,8 @@ window.addEventListener('error', e => {
 await mindarThree.start();
 
 renderer.setAnimationLoop(() => {
-  if (needsUpdate) {
-    needsUpdate = false;
-    place();            // runs ONLY when panel visibility changes
-  }
+  // Recompute centroid every frame — camera movement updates cube positions
+  if (visibleSet.size > 0) place();
 
   if (CUBE_A.visible) {
     CUBE_A.rotation.y += 0.012;
