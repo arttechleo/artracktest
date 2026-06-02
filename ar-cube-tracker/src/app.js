@@ -87,8 +87,8 @@ function place() {
   anchors[currentHost].group.worldToLocal(_c);
 
   // Three cubes — distinct positions, all float toward camera
-  CUBE_A.position.set(_c.x, _c.y + 0.12 * U, _c.z + FLOAT);
-  CUBE_B.position.set(_c.x, _c.y - 0.12 * U, _c.z + FLOAT);
+  CUBE_A.position.set(_c.x, _c.y + 0.03 * U, _c.z + FLOAT);
+  CUBE_B.position.set(_c.x, _c.y - 0.03 * U, _c.z + FLOAT);
 
   CUBE_A.visible = true;
   CUBE_B.visible = true;
@@ -110,13 +110,30 @@ hint.textContent = '📷 Point camera at the panels';
 document.body.appendChild(hint);
 
 anchors.forEach((anchor, i) => {
-  anchor.onTargetFound = () => { visibleSet.add(i); };
-  anchor.onTargetLost  = () => { visibleSet.delete(i); };
+  anchor.onTargetLost = () => {
+    visibleSet.delete(i);
+    if (visibleSet.size === 0) {
+      lostTimer = setTimeout(restartTracking, 5000);
+    }
+  };
+  anchor.onTargetFound = () => {
+    if (lostTimer) { clearTimeout(lostTimer); lostTimer = null; }
+    visibleSet.add(i);
+  };
 });
 
 window.addEventListener('error', e => {
   if (e.message?.includes('getProjectionMatrix')) e.preventDefault();
 }, true);
+
+// Auto-restart tracking if all panels lost for >5 seconds
+let lostTimer = null;
+const restartTracking = async () => {
+  try {
+    await mindarThree.stop();
+    await mindarThree.start();
+  } catch(e) { /* ignore */ }
+};
 
 await mindarThree.start();
 
