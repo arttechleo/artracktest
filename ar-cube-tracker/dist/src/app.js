@@ -97,11 +97,9 @@ function updatePlacement() {
 
     const lc = _cw.clone();
     anchors[hostIdx].group.worldToLocal(lc);
-    centerCube.position.copy(lc);
+    centerCube.position.set(0, 0, 0);
 
-    const le = lc.clone();
-    le.x += 0.5;
-    edgeCube.position.copy(le);
+    edgeCube.position.set(0.6, 0, 0);
 
     scene.attach(centerCube);
     scene.attach(edgeCube);
