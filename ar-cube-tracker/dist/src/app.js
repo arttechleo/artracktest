@@ -75,6 +75,7 @@ function place() {
   anchors[currentHost].group.worldToLocal(_c);
 
   CUBE_TOP.position.set(_c.x, _c.y + 0.03 * U, _c.z + FLOAT);
+  console.log('[AR] CUBES PLACED at local:', _c.x.toFixed(3), _c.y.toFixed(3), _c.z.toFixed(3), 'FLOAT:', FLOAT.toFixed(3));
   CUBE_BOT.position.set(_c.x, _c.y - 0.03 * U, _c.z + FLOAT);
 
   CUBE_TOP.visible = true;
@@ -99,11 +100,15 @@ let reloadTimer = null;
 
 anchors.forEach((anchor, i) => {
   anchor.onTargetFound = () => {
+    const wp = new THREE.Vector3();
+    wp.setFromMatrixPosition(anchors[i].group.matrixWorld);
+    console.log('[AR] BANNER FOUND anchor:', i, 'world pos:', wp.x.toFixed(3), wp.y.toFixed(3), wp.z.toFixed(3));
     visibleSet.add(i);
     if (reloadTimer) { clearTimeout(reloadTimer); reloadTimer = null; }
     hint.style.display = 'none';
   };
   anchor.onTargetLost = () => {
+    console.log('[AR] BANNER LOST anchor:', i, 'visibleSet will be:', visibleSet.size - 1);
     visibleSet.delete(i);
     if (visibleSet.size === 0) {
       CUBE_TOP.visible = false;
