@@ -1,7 +1,6 @@
 import * as THREE from 'three';
 import { MindARThree } from 'https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js';
 
-// [0] panel_roses  [1] panel_flower  [2] panel_lotus  [3] panel_sun
 const mindarThree = new MindARThree({
   container: document.querySelector('#ar-container'),
   imageTargetSrc: '/targets.mind',
@@ -19,11 +18,9 @@ const { renderer, scene, camera } = mindarThree;
 scene.background = null;
 renderer.setClearColor(0x000000, 0);
 scene.add(new THREE.AmbientLight(0xffffff, 1.0));
-const key = new THREE.DirectionalLight(0xffffff, 1.2);
-key.position.set(0, 2, 4);
-scene.add(key);
-scene.add(Object.assign(new THREE.DirectionalLight(0x8888ff, 0.4),
-  { position: new THREE.Vector3(-2, -1, 2) }));
+const keyLight = new THREE.DirectionalLight(0xffffff, 1.2);
+keyLight.position.set(0, 2, 4);
+scene.add(keyLight);
 
 const anchors = Array.from({ length: 4 }, (_, i) => mindarThree.addAnchor(i));
 
@@ -44,14 +41,14 @@ function makeCube(color, size) {
   return g;
 }
 
-// Physical scale: panel width 50cm = 1 mind-ar unit
-const U      = 1 / 0.50;
-const FLOAT  = 0.35 * U;  // 35cm toward camera
+const U     = 1 / 0.50;       // 1 unit = 50cm panel width
+const FLOAT = 0.35 * U;       // 35cm toward camera
 
-const CUBE_A = makeCube(0x00ccff, 0.18); // cyan  — top
-const CUBE_B = makeCube(0xff6600, 0.15); // orange — bottom
-CUBE_A.visible = false;
-CUBE_B.visible = false;
+// TWO CUBES — top and bottom, 3cm apart each side (6cm gap total)
+const CUBE_TOP = makeCube(0x00ccff, 0.16); // cyan
+const CUBE_BOT = makeCube(0xff6600, 0.16); // orange
+CUBE_TOP.visible = false;
+CUBE_BOT.visible = false;
 
 let currentHost = -1;
 const visibleSet = new Set();
@@ -59,23 +56,14 @@ const _p = new THREE.Vector3();
 const _c = new THREE.Vector3();
 
 function place() {
-  if (visibleSet.size === 0) {
-    CUBE_A.visible = false;
-    CUBE_B.visible = false;
-    currentHost = -1;
-    hint.style.display = 'block';
-    hint.textContent   = '📷 Point camera at the panels';
-    return;
-  }
-
   const hostIdx = Math.min(...visibleSet);
+
   if (hostIdx !== currentHost) {
-    anchors[hostIdx].group.add(CUBE_A);
-    anchors[hostIdx].group.add(CUBE_B);
+    anchors[hostIdx].group.add(CUBE_TOP);
+    anchors[hostIdx].group.add(CUBE_BOT);
     currentHost = hostIdx;
   }
 
-  // World centroid of all visible panels
   _c.set(0, 0, 0);
   visibleSet.forEach(i => {
     _p.setFromMatrixPosition(anchors[i].group.matrixWorld);
@@ -86,17 +74,14 @@ function place() {
   anchors[currentHost].group.updateWorldMatrix(true, false);
   anchors[currentHost].group.worldToLocal(_c);
 
-  // Three cubes — distinct positions, all float toward camera
-  CUBE_A.position.set(_c.x, _c.y + 0.03 * U, _c.z + FLOAT);
-  CUBE_B.position.set(_c.x, _c.y - 0.03 * U, _c.z + FLOAT);
+  CUBE_TOP.position.set(_c.x, _c.y + 0.03 * U, _c.z + FLOAT);
+  CUBE_BOT.position.set(_c.x, _c.y - 0.03 * U, _c.z + FLOAT);
 
-  CUBE_A.visible = true;
-  CUBE_B.visible = true;
-
-  hint.style.display = visibleSet.size < 2 ? 'block' : 'none';
-  hint.textContent = `👀 ${visibleSet.size}/4 panels — indices: ${[...visibleSet].join(',')}`;
+  CUBE_TOP.visible = true;
+  CUBE_BOT.visible = true;
 }
 
+// Hint overlay
 const hint = document.createElement('div');
 Object.assign(hint.style, {
   position:'fixed', bottom:'80px', left:'50%',
@@ -109,16 +94,25 @@ Object.assign(hint.style, {
 hint.textContent = '📷 Point camera at the panels';
 document.body.appendChild(hint);
 
+// Auto-reload 4 seconds after all panels lost
+let reloadTimer = null;
+
 anchors.forEach((anchor, i) => {
+  anchor.onTargetFound = () => {
+    visibleSet.add(i);
+    if (reloadTimer) { clearTimeout(reloadTimer); reloadTimer = null; }
+    hint.style.display = 'none';
+  };
   anchor.onTargetLost = () => {
     visibleSet.delete(i);
     if (visibleSet.size === 0) {
-      lostTimer = setTimeout(restartTracking, 5000);
+      CUBE_TOP.visible = false;
+      CUBE_BOT.visible = false;
+      currentHost = -1;
+      hint.textContent   = '📷 Point camera at the panels';
+      hint.style.display = 'block';
+      reloadTimer = setTimeout(() => location.reload(), 4000);
     }
-  };
-  anchor.onTargetFound = () => {
-    if (lostTimer) { clearTimeout(lostTimer); lostTimer = null; }
-    visibleSet.add(i);
   };
 });
 
@@ -126,22 +120,13 @@ window.addEventListener('error', e => {
   if (e.message?.includes('getProjectionMatrix')) e.preventDefault();
 }, true);
 
-// Auto-restart tracking if all panels lost for >5 seconds
-let lostTimer = null;
-const restartTracking = async () => {
-  try {
-    await mindarThree.stop();
-    await mindarThree.start();
-  } catch(e) { /* ignore */ }
-};
-
 await mindarThree.start();
 
 renderer.setAnimationLoop(() => {
   if (visibleSet.size > 0) place();
-  if (CUBE_A.visible) {
-    CUBE_A.rotation.y += 0.012;
-    CUBE_B.rotation.y -= 0.012;
+  if (CUBE_TOP.visible) {
+    CUBE_TOP.rotation.y += 0.012;
+    CUBE_BOT.rotation.y -= 0.012;
   }
   renderer.render(scene, camera);
 });
