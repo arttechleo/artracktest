@@ -79,6 +79,7 @@ const _cw = new THREE.Vector3();
 
 anchors.forEach((anchor, i) => {
   anchor.onTargetFound = () => {
+    console.log("TARGET FOUND", i);
     visibleSet.add(i);
     if (hideTimeout) { clearTimeout(hideTimeout); hideTimeout = null; }
     if (!placed) placeCubes();
@@ -128,7 +129,18 @@ window.addEventListener('error', e => {
 }, true);
 
 await mindarThree.start();
+console.log("Anchors created:", anchors.length);
 hint.style.display = 'block';
+
+// Test sphere on anchor 0 — confirms tracking works
+if (anchors[0]) {
+  const testSphere = new THREE.Mesh(
+    new THREE.SphereGeometry(0.1),
+    new THREE.MeshBasicMaterial({ color: 0xff0000 })
+  );
+  anchors[0].group.add(testSphere);
+  console.log('test sphere added to anchor 0');
+}
 
 renderer.setAnimationLoop(() => {
   if (placed) {
