@@ -1,10 +1,16 @@
+const origGUM = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+navigator.mediaDevices.getUserMedia = (c) => {
+  if (c.video) c.video = { ...c.video, width:{ideal:1920}, height:{ideal:1080}, facingMode:{ideal:"environment"} };
+  return origGUM(c);
+};
+
 import * as THREE from 'three';
 import { MindARThree } from 'https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js';
 
 const mindarThree = new MindARThree({
   container: document.querySelector('#ar-container'),
   imageTargetSrc: '/targets.mind',
-  maxTrack: 1,
+  maxTrack: 4,
   filterMinCF: 0.00001,
   filterBeta: 0.0001,
   missTolerance: 50,
@@ -22,7 +28,7 @@ const keyLight = new THREE.DirectionalLight(0xffffff, 1.2);
 keyLight.position.set(0, 2, 4);
 scene.add(keyLight);
 
-const anchors = Array.from({ length: 1 }, (_, i) => mindarThree.addAnchor(i));
+const anchors = Array.from({ length: 4 }, (_, i) => mindarThree.addAnchor(i));
 
 function makeCube(color, size) {
   const g = new THREE.Group();
