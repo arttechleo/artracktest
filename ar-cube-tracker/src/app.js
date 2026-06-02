@@ -50,7 +50,7 @@ function makeCube(color, size) {
 const U      = 1 / 0.50;          // units per meter
 const SPREAD = 0.18 * U;          // 18cm left/right
 const LIFT   = 0.08 * U;          // 8cm up
-const FLOAT  = 0.15 * U;          // 15cm toward camera
+const FLOAT  = 0.30 * U;          // 30cm toward camera
 
 const CUBE_A = makeCube(0x00ccff, 0.16);
 const CUBE_B = makeCube(0xff6600, 0.13);
