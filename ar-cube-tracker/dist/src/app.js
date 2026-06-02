@@ -57,11 +57,6 @@ let hideTimeout = null;
 const _wp = new THREE.Vector3();
 const _cw = new THREE.Vector3();
 
-function attach(cube, hostGroup, localPos) {
-  hostGroup.add(cube);
-  cube.position.copy(localPos);
-  cube.visible = true;
-}
 
 function updatePlacement() {
   if (visibleSet.size === 0) return;
