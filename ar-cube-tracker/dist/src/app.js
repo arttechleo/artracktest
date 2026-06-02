@@ -128,7 +128,28 @@ window.addEventListener('error', e => {
   if (e.message?.includes('getProjectionMatrix')) e.preventDefault();
 }, true);
 
-await mindarThree.start();
+// On-screen status — visible without any devtools
+const dbg = document.createElement('div');
+Object.assign(dbg.style, {
+  position:'fixed', top:'10px', left:'10px', right:'10px',
+  background:'rgba(0,0,0,0.8)', color:'lime', padding:'10px',
+  fontFamily:'monospace', fontSize:'12px', zIndex:'9999',
+  borderRadius:'8px', whiteSpace:'pre-wrap', pointerEvents:'none'
+});
+document.body.appendChild(dbg);
+const log = (msg) => { dbg.textContent += msg + '
+'; console.log(msg); };
+
+log('app.js loaded');
+log('anchors in loop: ' + anchors.length);
+
+try {
+  log('calling start()...');
+  await mindarThree.start();
+  log('start() OK');
+} catch(e) {
+  log('START ERROR: ' + e.message);
+}
 console.log("Anchors created:", anchors.length);
 hint.style.display = 'block';
 
