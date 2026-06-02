@@ -1,39 +1,49 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>AR Cube Tracker</title>
-    <style>
-      * { margin: 0; padding: 0; box-sizing: border-box; }
-      html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
-      #ar-container { position: relative; width: 100vw; height: 100vh; }
-      #ar-container video {
-        position: absolute !important;
-        top: 0 !important; left: 0 !important;
-        width: 100% !important; height: 100% !important;
-        object-fit: cover !important;
-        z-index: 0 !important;
-      }
-      #ar-container canvas {
-        position: absolute !important;
-        top: 0 !important; left: 0 !important;
-        width: 100% !important; height: 100% !important;
-        z-index: 1 !important;
-        background: transparent !important;
-      }
-    </style>
-  </head>
-  <body>
-    <div id="ar-container"></div>
-    <script type="importmap">
-    {
-      "imports": {
-        "three": "https://cdn.jsdelivr.net/npm/three@0.150.0/build/three.module.js",
-        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.150.0/examples/jsm/"
-      }
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>AR Panel Tracker</title>
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; }
+    html, body { width:100%; height:100%; overflow:hidden; background:#000; }
+    #overlay {
+      position:fixed; inset:0; display:flex; flex-direction:column;
+      align-items:center; justify-content:center; gap:20px; background:#000; z-index:100;
     }
-    </script>
-    <script type="module" src="/src/app.js"></script>
-  </body>
+    #start-btn {
+      padding:16px 48px; font-size:20px; border:none; border-radius:32px;
+      background:#00ccff; color:#000; font-weight:700; cursor:pointer;
+      font-family:-apple-system,sans-serif; letter-spacing:0.3px;
+    }
+    #hint {
+      color:rgba(255,255,255,0.7); font-family:-apple-system,sans-serif;
+      font-size:14px; text-align:center; max-width:280px; line-height:1.5;
+    }
+    #progress {
+      display:none; position:fixed; bottom:60px; left:50%;
+      transform:translateX(-50%); color:white;
+      background:rgba(0,0,0,0.72); padding:12px 24px;
+      border-radius:28px; font-size:14px; font-family:-apple-system,sans-serif;
+      z-index:50; pointer-events:none; text-align:center;
+      backdrop-filter:blur(8px); max-width:85vw;
+    }
+    canvas { position:fixed; inset:0; }
+  </style>
+</head>
+<body>
+  <div id="overlay">
+    <button id="start-btn">Start AR</button>
+    <p id="hint">Slowly sweep camera across all 4 panels to map the space</p>
+  </div>
+  <div id="progress"></div>
+  <canvas id="c"></canvas>
+  <script type="importmap">
+  { "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.150.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.150.0/examples/jsm/"
+  }}
+  </script>
+  <script type="module" src="/src/app.js"></script>
+</body>
 </html>
