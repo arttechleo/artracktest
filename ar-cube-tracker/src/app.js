@@ -54,8 +54,10 @@ const FLOAT  = 0.35 * U;          // 35cm toward camera
 
 const CUBE_A = makeCube(0x00ccff, 0.18);
 const CUBE_B = makeCube(0xff6600, 0.15);
+const CUBE_C = makeCube(0xaa44ff, 0.13);
 CUBE_A.visible = false;
 CUBE_B.visible = false;
+CUBE_C.visible = false;
 
 let currentHost = -1;
 const visibleSet = new Set();
@@ -67,6 +69,7 @@ function place() {
   if (visibleSet.size === 0) {
     CUBE_A.visible = false;
     CUBE_B.visible = false;
+    CUBE_C.visible = false;
     currentHost    = -1;
     hint.textContent   = '📷 Point camera at the panels';
     hint.style.display = 'block';
@@ -78,6 +81,7 @@ function place() {
   if (hostIdx !== currentHost) {
     anchors[hostIdx].group.add(CUBE_A);
     anchors[hostIdx].group.add(CUBE_B);
+    anchors[hostIdx].group.add(CUBE_C);
     currentHost = hostIdx;
   }
 
@@ -95,8 +99,11 @@ function place() {
   CUBE_A.position.set(_c.x - 0.05 * U, _c.y + 0.20 * U, _c.z + FLOAT);
   // Cube B: center, slightly lower — vertical stack, slight diagonal offset
   CUBE_B.position.set(_c.x + 0.05 * U, _c.y - 0.05 * U, _c.z + FLOAT + 0.05 * U);
+  // Cube C: purple, below center
+  CUBE_C.position.set(_c.x, _c.y - 0.22 * U, _c.z + FLOAT);
   CUBE_A.visible = true;
   CUBE_B.visible = true;
+  CUBE_C.visible = true;
 
   hint.style.display = visibleSet.size < 2 ? 'block' : 'none';
   hint.textContent   = '👀 Find more panels for accurate placement';
@@ -138,6 +145,7 @@ renderer.setAnimationLoop(() => {
   if (CUBE_A.visible) {
     CUBE_A.rotation.y += 0.012;
     CUBE_B.rotation.y -= 0.012;
+    CUBE_C.rotation.x += 0.010;
     CUBE_A.rotation.x  = Math.sin(Date.now() * 0.001) * 0.06;
     CUBE_B.rotation.x  = Math.cos(Date.now() * 0.001) * 0.06;
   }
