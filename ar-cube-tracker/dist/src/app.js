@@ -48,12 +48,10 @@ function makeCube(color, size) {
 const U      = 1 / 0.50;
 const FLOAT  = 0.35 * U;  // 35cm toward camera
 
-const CUBE_A = makeCube(0x00ccff, 0.18); // cyan  — upper left
-const CUBE_B = makeCube(0xff6600, 0.15); // orange — upper right
-const CUBE_C = makeCube(0xaa44ff, 0.13); // purple — below center
+const CUBE_A = makeCube(0x00ccff, 0.18); // cyan  — top
+const CUBE_B = makeCube(0xff6600, 0.15); // orange — bottom
 CUBE_A.visible = false;
 CUBE_B.visible = false;
-CUBE_C.visible = false;
 
 let currentHost = -1;
 const visibleSet = new Set();
@@ -64,7 +62,6 @@ function place() {
   if (visibleSet.size === 0) {
     CUBE_A.visible = false;
     CUBE_B.visible = false;
-    CUBE_C.visible = false;
     currentHost = -1;
     hint.style.display = 'block';
     hint.textContent   = '📷 Point camera at the panels';
@@ -75,7 +72,6 @@ function place() {
   if (hostIdx !== currentHost) {
     anchors[hostIdx].group.add(CUBE_A);
     anchors[hostIdx].group.add(CUBE_B);
-    anchors[hostIdx].group.add(CUBE_C);
     currentHost = hostIdx;
   }
 
@@ -91,13 +87,11 @@ function place() {
   anchors[currentHost].group.worldToLocal(_c);
 
   // Three cubes — distinct positions, all float toward camera
-  CUBE_A.position.set(_c.x - 0.6 * U, _c.y + 0.3 * U, _c.z + FLOAT);
-  CUBE_B.position.set(_c.x + 0.6 * U, _c.y + 0.3 * U, _c.z + FLOAT);
-  CUBE_C.position.set(_c.x,             _c.y - 0.5 * U, _c.z + FLOAT);
+  CUBE_A.position.set(_c.x, _c.y + 0.12 * U, _c.z + FLOAT);
+  CUBE_B.position.set(_c.x, _c.y - 0.12 * U, _c.z + FLOAT);
 
   CUBE_A.visible = true;
   CUBE_B.visible = true;
-  CUBE_C.visible = true;
 
   hint.style.display = visibleSet.size < 2 ? 'block' : 'none';
   hint.textContent = `👀 ${visibleSet.size}/4 panels — indices: ${[...visibleSet].join(',')}`;
@@ -131,8 +125,6 @@ renderer.setAnimationLoop(() => {
   if (CUBE_A.visible) {
     CUBE_A.rotation.y += 0.012;
     CUBE_B.rotation.y -= 0.012;
-    CUBE_C.rotation.x += 0.010;
-    CUBE_C.rotation.y += 0.008;
   }
   renderer.render(scene, camera);
 });
