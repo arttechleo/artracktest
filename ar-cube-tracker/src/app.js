@@ -50,10 +50,10 @@ function makeCube(color, size) {
 const U      = 1 / 0.50;          // units per meter
 const SPREAD = 0.18 * U;          // 18cm left/right
 const LIFT   = 0.08 * U;          // 8cm up
-const FLOAT  = 0.30 * U;          // 30cm toward camera
+const FLOAT  = 0.35 * U;          // 35cm toward camera
 
-const CUBE_A = makeCube(0x00ccff, 0.16);
-const CUBE_B = makeCube(0xff6600, 0.13);
+const CUBE_A = makeCube(0x00ccff, 0.18);
+const CUBE_B = makeCube(0xff6600, 0.15);
 CUBE_A.visible = false;
 CUBE_B.visible = false;
 
@@ -90,8 +90,10 @@ function place() {
   anchors[currentHost].group.updateWorldMatrix(true, false);
   anchors[currentHost].group.worldToLocal(_c);
 
-  CUBE_A.position.set(_c.x - SPREAD, _c.y + LIFT, _c.z + FLOAT);
-  CUBE_B.position.set(_c.x + SPREAD, _c.y + LIFT, _c.z + FLOAT);
+  // Cube A: center, slightly elevated
+  CUBE_A.position.set(_c.x - 0.05 * U, _c.y + 0.20 * U, _c.z + FLOAT);
+  // Cube B: center, slightly lower — vertical stack, slight diagonal offset
+  CUBE_B.position.set(_c.x + 0.05 * U, _c.y - 0.05 * U, _c.z + FLOAT + 0.05 * U);
   CUBE_A.visible = true;
   CUBE_B.visible = true;
 
