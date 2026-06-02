@@ -60,10 +60,17 @@ const CUBE_B = makeCube(0xff6600, 0.13); // orange — edge
 CUBE_A.visible = false;
 CUBE_B.visible = false;
 
-// ─── PLACEMENT CONFIG ────────────────────────────────────────────────────────
-const SPREAD = 0.32; // left/right offset from centroid (host-anchor units)
-const LIFT   = 0.06; // upward offset
-const FLOAT  = 0.28; // toward camera (positive Z in anchor-local space)
+// ─── PHYSICAL SCALE ──────────────────────────────────────────────────────────
+// Panel: 50cm wide × 70cm tall (physical measurements confirmed)
+// mind-ar: 1 unit = panel width = 0.50m
+// All placement values below are in real meters, converted to mind-ar units
+const PANEL_WIDTH_M = 0.50; // 50cm confirmed physical width
+const U = 1 / PANEL_WIDTH_M; // units per meter: 1m = 2 mind-ar units
+
+// ─── PLACEMENT CONFIG (real meters) ──────────────────────────────────────────
+const SPREAD = 0.18 * U; // 18cm left/right of centroid
+const LIFT   = 0.08 * U; // 8cm upward
+const FLOAT  = 0.15 * U; // 15cm toward camera
 // ─────────────────────────────────────────────────────────────────────────────
 
 let currentHost = -1;
