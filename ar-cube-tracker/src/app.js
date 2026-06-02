@@ -8,7 +8,7 @@ const mindarThree = new MindARThree({
   maxTrack: 4,
   filterMinCF: 0.00001,
   filterBeta: 0.0001,
-  missTolerance: 50,    // hold tracking much longer — prevents false drops
+  missTolerance: 50,
   warmupTolerance: 1,
   uiLoading: 'no',
   uiScanning: 'no',
@@ -18,14 +18,12 @@ const mindarThree = new MindARThree({
 const { renderer, scene, camera } = mindarThree;
 scene.background = null;
 renderer.setClearColor(0x000000, 0);
-
 scene.add(new THREE.AmbientLight(0xffffff, 1.0));
 const key = new THREE.DirectionalLight(0xffffff, 1.2);
 key.position.set(0, 2, 4);
 scene.add(key);
-const fill = new THREE.DirectionalLight(0x8888ff, 0.4);
-fill.position.set(-2, -1, 2);
-scene.add(fill);
+scene.add(Object.assign(new THREE.DirectionalLight(0x8888ff, 0.4),
+  { position: new THREE.Vector3(-2, -1, 2) }));
 
 const anchors = Array.from({ length: 4 }, (_, i) => mindarThree.addAnchor(i));
 
@@ -34,7 +32,7 @@ function makeCube(color, size) {
   g.add(new THREE.Mesh(
     new THREE.BoxGeometry(size, size, size),
     new THREE.MeshStandardMaterial({
-      color, emissive: color, emissiveIntensity: 0.15,
+      color, emissive: color, emissiveIntensity: 0.2,
       transparent: true, opacity: 0.92,
       roughness: 0.3, metalness: 0.4,
     })
@@ -46,22 +44,19 @@ function makeCube(color, size) {
   return g;
 }
 
-// Physical scale: 50cm panel width = 1 mind-ar unit
-const U      = 1 / 0.50;          // units per meter
-const SPREAD = 0.18 * U;          // 18cm left/right
-const LIFT   = 0.08 * U;          // 8cm up
-const FLOAT  = 0.35 * U;          // 35cm toward camera
+// Physical scale: panel width 50cm = 1 mind-ar unit
+const U      = 1 / 0.50;
+const FLOAT  = 0.35 * U;  // 35cm toward camera
 
-const CUBE_A = makeCube(0x00ccff, 0.18);
-const CUBE_B = makeCube(0xff6600, 0.15);
-const CUBE_C = makeCube(0xaa44ff, 0.13);
+const CUBE_A = makeCube(0x00ccff, 0.18); // cyan  — upper left
+const CUBE_B = makeCube(0xff6600, 0.15); // orange — upper right
+const CUBE_C = makeCube(0xaa44ff, 0.13); // purple — below center
 CUBE_A.visible = false;
 CUBE_B.visible = false;
 CUBE_C.visible = false;
 
 let currentHost = -1;
 const visibleSet = new Set();
-
 const _p = new THREE.Vector3();
 const _c = new THREE.Vector3();
 
@@ -70,14 +65,13 @@ function place() {
     CUBE_A.visible = false;
     CUBE_B.visible = false;
     CUBE_C.visible = false;
-    currentHost    = -1;
-    hint.textContent   = '📷 Point camera at the panels';
+    currentHost = -1;
     hint.style.display = 'block';
+    hint.textContent   = '📷 Point camera at the panels';
     return;
   }
 
   const hostIdx = Math.min(...visibleSet);
-
   if (hostIdx !== currentHost) {
     anchors[hostIdx].group.add(CUBE_A);
     anchors[hostIdx].group.add(CUBE_B);
@@ -85,6 +79,7 @@ function place() {
     currentHost = hostIdx;
   }
 
+  // World centroid of all visible panels
   _c.set(0, 0, 0);
   visibleSet.forEach(i => {
     _p.setFromMatrixPosition(anchors[i].group.matrixWorld);
@@ -95,12 +90,11 @@ function place() {
   anchors[currentHost].group.updateWorldMatrix(true, false);
   anchors[currentHost].group.worldToLocal(_c);
 
-  // Cube A: center, slightly elevated
-  CUBE_A.position.set(_c.x - 0.05 * U, _c.y + 0.20 * U, _c.z + FLOAT);
-  // Cube B: center, slightly lower — vertical stack, slight diagonal offset
-  CUBE_B.position.set(_c.x + 0.05 * U, _c.y - 0.05 * U, _c.z + FLOAT + 0.05 * U);
-  // Cube C: purple, below center
-  CUBE_C.position.set(_c.x, _c.y - 0.22 * U, _c.z + FLOAT);
+  // Three cubes — distinct positions, all float toward camera
+  CUBE_A.position.set(_c.x - 0.12 * U, _c.y + 0.18 * U, _c.z + FLOAT);
+  CUBE_B.position.set(_c.x + 0.12 * U, _c.y + 0.18 * U, _c.z + FLOAT);
+  CUBE_C.position.set(_c.x,             _c.y - 0.10 * U, _c.z + FLOAT);
+
   CUBE_A.visible = true;
   CUBE_B.visible = true;
   CUBE_C.visible = true;
@@ -114,22 +108,16 @@ Object.assign(hint.style, {
   position:'fixed', bottom:'80px', left:'50%',
   transform:'translateX(-50%)', color:'white',
   background:'rgba(0,0,0,0.72)', padding:'12px 28px',
-  borderRadius:'28px', fontSize:'15px',
-  fontFamily:'-apple-system, sans-serif', pointerEvents:'none',
-  zIndex:'999', display:'block', textAlign:'center',
-  backdropFilter:'blur(8px)',
+  borderRadius:'28px', fontSize:'15px', display:'block',
+  fontFamily:'-apple-system,sans-serif', pointerEvents:'none',
+  zIndex:'999', textAlign:'center', backdropFilter:'blur(8px)',
 });
 hint.textContent = '📷 Point camera at the panels';
 document.body.appendChild(hint);
 
-// Event-driven — recompute ONLY when a panel enters or leaves camera view
 anchors.forEach((anchor, i) => {
-  anchor.onTargetFound = () => {
-    visibleSet.add(i);
-  };
-  anchor.onTargetLost = () => {
-    visibleSet.delete(i);
-  };
+  anchor.onTargetFound = () => { visibleSet.add(i); };
+  anchor.onTargetLost  = () => { visibleSet.delete(i); };
 });
 
 window.addEventListener('error', e => {
@@ -139,16 +127,12 @@ window.addEventListener('error', e => {
 await mindarThree.start();
 
 renderer.setAnimationLoop(() => {
-  // Recompute centroid every frame — camera movement updates cube positions
   if (visibleSet.size > 0) place();
-
   if (CUBE_A.visible) {
     CUBE_A.rotation.y += 0.012;
     CUBE_B.rotation.y -= 0.012;
     CUBE_C.rotation.x += 0.010;
-    CUBE_A.rotation.x  = Math.sin(Date.now() * 0.001) * 0.06;
-    CUBE_B.rotation.x  = Math.cos(Date.now() * 0.001) * 0.06;
+    CUBE_C.rotation.y += 0.008;
   }
-
   renderer.render(scene, camera);
 });
