@@ -62,7 +62,7 @@ edgeCube.visible   = false;
 // Total targets = all images in day/ + night/ combined
 // Detect count from targets.mind at runtime isn't exposed by mind-ar,
 // so we add a generous number of anchors and ignore unused ones.
-const TARGET_COUNT = 30; // increase if you have more images
+const TARGET_COUNT = 40; // 35 targets compiled (day+night); headroom for more
 const anchors = [];
 
 for (let i = 0; i < TARGET_COUNT; i++) {
