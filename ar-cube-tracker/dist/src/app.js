@@ -8,8 +8,11 @@ const mindarThree = new MindARThree({
   maxTrack: 4,
   filterMinCF: 0.00001,
   filterBeta: 0.0001,
-  missTolerance: 20,
+  missTolerance: 30,
   warmupTolerance: 1,
+  uiLoading: 'no',
+  uiScanning: 'no',
+  uiError: 'no',
 });
 
 const { renderer, scene, camera } = mindarThree;
