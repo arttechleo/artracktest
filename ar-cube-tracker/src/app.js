@@ -1,7 +1,10 @@
 import * as THREE from 'three';
 import { MindARThree } from 'https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js';
 
+// ─── TARGET MAP ──────────────────────────────────────────────────────────────
 // [0] panel_roses  [1] panel_flower  [2] panel_lotus  [3] panel_sun
+// ─────────────────────────────────────────────────────────────────────────────
+
 const mindarThree = new MindARThree({
   container: document.querySelector('#ar-container'),
   imageTargetSrc: '/targets.mind',
@@ -18,107 +21,103 @@ const mindarThree = new MindARThree({
 const { renderer, scene, camera } = mindarThree;
 scene.background = null;
 renderer.setClearColor(0x000000, 0);
-scene.add(new THREE.AmbientLight(0xffffff, 1.2));
-scene.add(Object.assign(
-  new THREE.DirectionalLight(0xffffff, 1),
-  { position: new THREE.Vector3(0, 1, 2) }
-));
+
+const ambient = new THREE.AmbientLight(0xffffff, 1.0);
+const keyLight = new THREE.DirectionalLight(0xffffff, 1.2);
+keyLight.position.set(0, 2, 4);
+const fillLight = new THREE.DirectionalLight(0x8888ff, 0.4);
+fillLight.position.set(-2, -1, 2);
+scene.add(ambient, keyLight, fillLight);
 
 const anchors = Array.from({ length: 4 }, (_, i) => mindarThree.addAnchor(i));
 
-// Small dot on each panel — confirms which panels are actively tracked
-const PANEL_COLORS = [0xff4444, 0x44ff44, 0x4444ff, 0xffff44];
-const dots = anchors.map((anchor, i) => {
-  const dot = new THREE.Mesh(
-    new THREE.SphereGeometry(0.06),
-    new THREE.MeshBasicMaterial({ color: PANEL_COLORS[i] })
-  );
-  dot.position.set(0, 0, 0.05); // just above panel face
-  dot.visible = false;
-  anchor.group.add(dot);
-  return dot;
-});
-
-// Two main cubes — added to scene root, positioned via worldToLocal each frame
+// ─── CUBE FACTORY ─────────────────────────────────────────────────────────────
 function makeCube(color, size) {
   const g = new THREE.Group();
-  g.add(new THREE.Mesh(
-    new THREE.BoxGeometry(size, size, size),
-    new THREE.MeshStandardMaterial({
-      color,
-      transparent: true,
-      opacity: 0.88,
-      emissive: color,
-      emissiveIntensity: 0.2
-    })
-  ));
+
+  const mat = new THREE.MeshStandardMaterial({
+    color,
+    emissive: color,
+    emissiveIntensity: 0.15,
+    transparent: true,
+    opacity: 0.92,
+    roughness: 0.3,
+    metalness: 0.4,
+  });
+
+  g.add(new THREE.Mesh(new THREE.BoxGeometry(size, size, size), mat));
+
   g.add(new THREE.LineSegments(
     new THREE.EdgesGeometry(new THREE.BoxGeometry(size, size, size)),
-    new THREE.LineBasicMaterial({ color: 0xffffff, linewidth: 2 })
+    new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9 })
   ));
+
   return g;
 }
 
-const centerCube = makeCube(0x00ccff, 0.16);
-const edgeCube   = makeCube(0xff6600, 0.12);
-centerCube.visible = false;
-edgeCube.visible   = false;
+const CUBE_A = makeCube(0x00ccff, 0.16); // cyan  — center
+const CUBE_B = makeCube(0xff6600, 0.13); // orange — edge
+CUBE_A.visible = false;
+CUBE_B.visible = false;
 
-// Cubes live on anchor 0 permanently — reparented only when host changes
-let hostIdx = -1;
+// ─── PLACEMENT CONFIG ────────────────────────────────────────────────────────
+const SPREAD = 0.32; // left/right offset from centroid (host-anchor units)
+const LIFT   = 0.06; // upward offset
+const FLOAT  = 0.28; // toward camera (positive Z in anchor-local space)
+// ─────────────────────────────────────────────────────────────────────────────
 
-const hint = document.createElement('div');
-Object.assign(hint.style, {
-  position:'fixed', bottom:'80px', left:'50%',
-  transform:'translateX(-50%)', color:'white',
-  background:'rgba(0,0,0,0.7)', padding:'12px 28px',
-  borderRadius:'28px', fontSize:'15px', display:'block',
-  zIndex:'999', fontFamily:'sans-serif', pointerEvents:'none',
-  textAlign:'center', lineHeight:'1.4'
-});
-hint.textContent = '📷 Point camera at the panels';
-document.body.appendChild(hint);
+let currentHost = -1;
+const _wp = new THREE.Vector3();
+const _cw = new THREE.Vector3();
 
-const _wp  = new THREE.Vector3();
-const _cw  = new THREE.Vector3();
-let prevKey = '';
+// ─── PLACEMENT ENGINE ────────────────────────────────────────────────────────
+// mind-ar drives each anchor via group.matrix (matrixAutoUpdate=false), so
+// group.position stays (0,0,0). Real pose lives in the matrix — read it via
+// getWorldPosition, average in world space, then convert to host-local.
+function place(visibleSet) {
+  const hostIdx = Math.min(...visibleSet);
 
-function placeCubes(visibleSet) {
-  const count   = visibleSet.size;
-  const newHost = Math.min(...visibleSet);
-
-  // Reparent cubes to new host if changed
-  if (newHost !== hostIdx) {
-    anchors[newHost].group.add(centerCube);
-    anchors[newHost].group.add(edgeCube);
-    hostIdx = newHost;
+  if (hostIdx !== currentHost) {
+    anchors[hostIdx].group.add(CUBE_A);
+    anchors[hostIdx].group.add(CUBE_B);
+    currentHost = hostIdx;
   }
 
-  // Compute world-space centroid of all visible panels
+  // World-space centroid of all visible panels
   _cw.set(0, 0, 0);
   visibleSet.forEach(i => {
     anchors[i].group.getWorldPosition(_wp);
     _cw.add(_wp);
   });
-  _cw.divideScalar(count);
+  _cw.divideScalar(visibleSet.size);
 
-  // Convert centroid to host-anchor local space
-  anchors[hostIdx].group.updateWorldMatrix(true, false);
+  // World centroid → host-anchor local space
+  anchors[currentHost].group.updateWorldMatrix(true, false);
   const local = _cw.clone();
-  anchors[hostIdx].group.worldToLocal(local);
+  anchors[currentHost].group.worldToLocal(local);
 
-  // Float cubes TOWARD camera: positive Z in anchor-local = toward viewer
-  // Separate cubes left/right around the centroid
-  const spread = count >= 2 ? 0.35 : 0.28;
-  const lift   = 0.05;
-  const depth  = 0.35; // float out from panel face
-
-  centerCube.position.set(local.x - spread, local.y + lift, local.z + depth);
-  edgeCube.position.set(  local.x + spread, local.y + lift, local.z + depth);
-
-  centerCube.visible = true;
-  edgeCube.visible   = true;
+  CUBE_A.position.set(local.x - SPREAD, local.y + LIFT, local.z + FLOAT);
+  CUBE_B.position.set(local.x + SPREAD, local.y + LIFT, local.z + FLOAT);
+  CUBE_A.visible = true;
+  CUBE_B.visible = true;
 }
+
+// ─── HINT ────────────────────────────────────────────────────────────────────
+const hint = document.createElement('div');
+Object.assign(hint.style, {
+  position: 'fixed', bottom: '80px', left: '50%',
+  transform: 'translateX(-50%)', color: 'white',
+  background: 'rgba(0,0,0,0.72)', padding: '12px 28px',
+  borderRadius: '28px', fontSize: '15px',
+  fontFamily: '-apple-system, sans-serif', pointerEvents: 'none',
+  zIndex: '999', display: 'block', textAlign: 'center',
+  backdropFilter: 'blur(8px)', letterSpacing: '0.3px',
+});
+hint.textContent = '📷 Point camera at the panels';
+document.body.appendChild(hint);
+
+// ─── MAIN LOOP ────────────────────────────────────────────────────────────────
+let prevKey = '';
 
 window.addEventListener('error', e => {
   if (e.message?.includes('getProjectionMatrix')) e.preventDefault();
@@ -127,43 +126,34 @@ window.addEventListener('error', e => {
 await mindarThree.start();
 
 renderer.setAnimationLoop(() => {
-  // Per-frame visibility from anchor group state
-  const visibleSet = new Set();
-  anchors.forEach((anchor, i) => {
-    const tracked = anchor.group.visible;
-    dots[i].visible = tracked;
-    if (tracked) visibleSet.add(i);
-  });
+  // Per-frame panel visibility — source of truth
+  const vis = new Set();
+  anchors.forEach((a, i) => { if (a.group.visible) vis.add(i); });
 
-  const key = [...visibleSet].sort().join(',');
+  const key = [...vis].sort().join(',');
 
   if (key !== prevKey) {
     prevKey = key;
 
-    if (visibleSet.size === 0) {
-      centerCube.visible = false;
-      edgeCube.visible   = false;
-      hostIdx = -1;
+    if (vis.size === 0) {
+      CUBE_A.visible = false;
+      CUBE_B.visible = false;
+      currentHost = -1;
+      hint.textContent   = '📷 Point camera at the panels';
       hint.style.display = 'block';
     } else {
-      placeCubes(visibleSet);
-      hint.style.display = visibleSet.size < 2
-        ? '📷 Find more panels for better placement'
-        : 'none';
+      place(vis);
+      hint.style.display = vis.size < 2 ? 'block' : 'none';
+      hint.textContent = vis.size < 2
+        ? '👀 Find more panels for accurate placement' : '';
     }
   }
 
-  // Hint update without recompute
-  if (visibleSet.size > 0 && visibleSet.size < 2) {
-    hint.style.display = 'block';
-    hint.textContent   = '👀 Point camera at the other panels';
-  } else if (visibleSet.size >= 2) {
-    hint.style.display = 'none';
-  }
-
-  if (centerCube.visible) {
-    centerCube.rotation.y += 0.012;
-    edgeCube.rotation.y   -= 0.012;
+  if (CUBE_A.visible) {
+    CUBE_A.rotation.y += 0.012;
+    CUBE_B.rotation.y -= 0.012;
+    CUBE_A.rotation.x  = Math.sin(Date.now() * 0.001) * 0.06;
+    CUBE_B.rotation.x  = Math.cos(Date.now() * 0.001) * 0.06;
   }
 
   renderer.render(scene, camera);
