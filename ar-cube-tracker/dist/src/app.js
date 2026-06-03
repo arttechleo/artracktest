@@ -1,3 +1,16 @@
+// ---------------------------------------------------------------------------
+// AR Cube Tracker — AprilTag (tag36h11) pose tracking
+//
+// Detects two printed AprilTags (TL=id0, TR=id1), estimates each tag's metric
+// 6DoF pose via the apriltag WASM detector, and places a three.js cube at the
+// 3D midpoint between them. Robust under stage lighting (fiducial detection,
+// not photometric feature matching).
+//
+// Physical setup: print stage_TL_id0 + stage_TR_id1, mount flat, measure the
+// black-border size and set TAG_SIZE_M below.
+// ---------------------------------------------------------------------------
+
+// Force rear camera at 1080p
 const origGUM = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
 navigator.mediaDevices.getUserMedia = (c) => {
   if (c.video) c.video = { ...c.video, width:{ideal:1920}, height:{ideal:1080}, facingMode:{ideal:"environment"} };
@@ -5,30 +18,66 @@ navigator.mediaDevices.getUserMedia = (c) => {
 };
 
 import * as THREE from 'three';
-import { MindARThree } from 'https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js';
+import * as Comlink from '/apriltag/comlink.mjs';
 
-const mindarThree = new MindARThree({
-  container: document.querySelector('#ar-container'),
-  imageTargetSrc: '/targets.mind',
-  maxTrack: 1,
-  filterMinCF: 0.00001,
-  filterBeta: 0.0001,
-  missTolerance: 50,
-  warmupTolerance: 1,
-  uiLoading: 'no',
-  uiScanning: 'no',
-  uiError: 'no',
+// ----------------------------------------------------------------- tunables
+const TAG_TL = 0;            // top-left  stage tag id
+const TAG_TR = 1;            // top-right stage tag id
+const TAG_SIZE_M = 0.20;     // printed black-border size in METERS (200 mm)
+const HFOV_DEG = 60;         // camera horizontal field of view (approx)
+const PROC_W = 960;          // detector processing width (px); smaller = faster
+const LERP = 0.25;           // cube position smoothing (0..1, higher = snappier)
+const SINGLE_TAG_FALLBACK = true; // if only one tag visible, hold last midpoint
+
+// ----------------------------------------------------------------- DOM / video
+const container = document.querySelector('#ar-container');
+const video = document.createElement('video');
+video.setAttribute('playsinline', '');
+video.muted = true;
+container.appendChild(video);
+
+const stream = await navigator.mediaDevices.getUserMedia({
+  video: { facingMode: { ideal: 'environment' } }, audio: false,
 });
+video.srcObject = stream;
+await video.play();
 
-const { renderer, scene, camera } = mindarThree;
-scene.background = null;
+const vw = video.videoWidth || 1280;
+const vh = video.videoHeight || 720;
+const PROC_H = Math.round(PROC_W * vh / vw);
+
+// processing canvas (downscaled grayscale source for the detector)
+const proc = document.createElement('canvas');
+proc.width = PROC_W; proc.height = PROC_H;
+const pctx = proc.getContext('2d', { willReadFrequently: true });
+
+// ----------------------------------------------------------------- three.js
+const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+renderer.setPixelRatio(window.devicePixelRatio);
 renderer.setClearColor(0x000000, 0);
+container.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+
+// camera fixed at origin, looking down -Z (AprilTag poses are in camera space)
+const camera = new THREE.PerspectiveCamera(60, 1, 0.01, 100);
+function resize() {
+  const w = window.innerWidth, h = window.innerHeight;
+  renderer.setSize(w, h);
+  camera.aspect = w / h;
+  // vertical fov derived from horizontal fov + current display aspect
+  const hfov = THREE.MathUtils.degToRad(HFOV_DEG);
+  const vfov = 2 * Math.atan(Math.tan(hfov / 2) / camera.aspect);
+  camera.fov = THREE.MathUtils.radToDeg(vfov);
+  camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', resize);
+resize();
+
 scene.add(new THREE.AmbientLight(0xffffff, 1.0));
 const keyLight = new THREE.DirectionalLight(0xffffff, 1.2);
 keyLight.position.set(0, 2, 4);
 scene.add(keyLight);
-
-const anchors = Array.from({ length: 1 }, (_, i) => mindarThree.addAnchor(i));
 
 function makeCube(color, size) {
   const g = new THREE.Group();
@@ -36,8 +85,7 @@ function makeCube(color, size) {
     new THREE.BoxGeometry(size, size, size),
     new THREE.MeshStandardMaterial({
       color, emissive: color, emissiveIntensity: 0.2,
-      transparent: true, opacity: 0.92,
-      roughness: 0.3, metalness: 0.4,
+      transparent: true, opacity: 0.92, roughness: 0.3, metalness: 0.4,
     })
   ));
   g.add(new THREE.LineSegments(
@@ -47,97 +95,93 @@ function makeCube(color, size) {
   return g;
 }
 
-const U     = 1 / 0.50;       // 1 unit = 50cm panel width
-const FLOAT = 0.35 * U;       // 35cm toward camera
+const cube = makeCube(0x00ccff, 1); // unit cube, scaled per-frame to tag gap
+cube.visible = false;
+scene.add(cube);
 
-// TWO CUBES — top and bottom, 3cm apart each side (6cm gap total)
-const CUBE_TOP = makeCube(0x00ccff, 0.16); // cyan
-const CUBE_BOT = makeCube(0xff6600, 0.16); // orange
-CUBE_TOP.visible = false;
-CUBE_BOT.visible = false;
+// ----------------------------------------------------------------- detector
+// intrinsics at PROCESSING resolution (must match the image we feed detect())
+const fx = (PROC_W / 2) / Math.tan(THREE.MathUtils.degToRad(HFOV_DEG) / 2);
+const fy = fx;                         // square pixels
+const cx = PROC_W / 2, cy = PROC_H / 2;
 
-let currentHost = -1;
-const visibleSet = new Set();
-const _p = new THREE.Vector3();
-const _c = new THREE.Vector3();
+let detectorReady = false;
+const Apriltag = Comlink.wrap(new Worker('/apriltag/apriltag.js'));
+const detector = await new Apriltag(Comlink.proxy(() => { detectorReady = true; }));
+await detector.set_camera_info(fx, fy, cx, cy);
+await detector.set_tag_size(TAG_TL, TAG_SIZE_M);
+await detector.set_tag_size(TAG_TR, TAG_SIZE_M);
 
-function place() {
-  const hostIdx = Math.min(...visibleSet);
+// AprilTag pose t = [x,y,z] in OpenCV cam coords (x right, y down, z forward).
+// three.js view space = (x right, y up, z toward viewer) -> flip y and z.
+function poseToVec3(t) { return new THREE.Vector3(t[0], -t[1], -t[2]); }
 
-  if (hostIdx !== currentHost) {
-    anchors[hostIdx].group.add(CUBE_TOP);
-    anchors[hostIdx].group.add(CUBE_BOT);
-    currentHost = hostIdx;
+const grayscale = new Uint8Array(PROC_W * PROC_H);
+let busy = false;
+const pos = { [TAG_TL]: null, [TAG_TR]: null };
+const lastMid = new THREE.Vector3();
+let haveMid = false;
+
+async function detectLoop() {
+  if (!detectorReady || busy) return;
+  busy = true;
+  try {
+    pctx.drawImage(video, 0, 0, PROC_W, PROC_H);
+    const px = pctx.getImageData(0, 0, PROC_W, PROC_H).data;
+    for (let i = 0, j = 0; i < px.length; i += 4, j++) {
+      grayscale[j] = (px[i] + px[i + 1] + px[i + 2]) / 3;
+    }
+    const dets = await detector.detect(grayscale, PROC_W, PROC_H);
+    pos[TAG_TL] = pos[TAG_TR] = null;
+    for (const d of dets) {
+      if ((d.id === TAG_TL || d.id === TAG_TR) && d.pose && d.pose.t) {
+        pos[d.id] = poseToVec3(d.pose.t);
+      }
+    }
+  } catch (e) {
+    console.warn('[AR] detect error', e);
+  } finally {
+    busy = false;
   }
-
-  _c.set(0, 0, 0);
-  visibleSet.forEach(i => {
-    _p.setFromMatrixPosition(anchors[i].group.matrixWorld);
-    _c.add(_p);
-  });
-  _c.divideScalar(visibleSet.size);
-
-  anchors[currentHost].group.updateWorldMatrix(true, false);
-  anchors[currentHost].group.worldToLocal(_c);
-
-  CUBE_TOP.position.set(_c.x, _c.y + 0.03 * U, _c.z + FLOAT);
-  console.log('[AR] CUBES PLACED at local:', _c.x.toFixed(3), _c.y.toFixed(3), _c.z.toFixed(3), 'FLOAT:', FLOAT.toFixed(3));
-  CUBE_BOT.position.set(_c.x, _c.y - 0.03 * U, _c.z + FLOAT);
-
-  CUBE_TOP.visible = true;
-  CUBE_BOT.visible = true;
 }
 
-// Hint overlay
+// ----------------------------------------------------------------- hint UI
 const hint = document.createElement('div');
 Object.assign(hint.style, {
-  position:'fixed', bottom:'80px', left:'50%',
-  transform:'translateX(-50%)', color:'white',
-  background:'rgba(0,0,0,0.72)', padding:'12px 28px',
-  borderRadius:'28px', fontSize:'15px', display:'block',
-  fontFamily:'-apple-system,sans-serif', pointerEvents:'none',
-  zIndex:'999', textAlign:'center', backdropFilter:'blur(8px)',
+  position:'fixed', bottom:'80px', left:'50%', transform:'translateX(-50%)',
+  color:'white', background:'rgba(0,0,0,0.72)', padding:'12px 28px',
+  borderRadius:'28px', fontSize:'15px', fontFamily:'-apple-system,sans-serif',
+  pointerEvents:'none', zIndex:'999', textAlign:'center', backdropFilter:'blur(8px)',
 });
-hint.textContent = '📷 Point camera at the panels';
+hint.textContent = '📷 Point camera at both AprilTags (id 0 + id 1)';
 document.body.appendChild(hint);
 
-// Auto-reload 4 seconds after all panels lost
-let reloadTimer = null;
-
-anchors.forEach((anchor, i) => {
-  anchor.onTargetFound = () => {
-    const wp = new THREE.Vector3();
-    wp.setFromMatrixPosition(anchors[i].group.matrixWorld);
-    console.log('[AR] BANNER FOUND anchor:', i, 'world pos:', wp.x.toFixed(3), wp.y.toFixed(3), wp.z.toFixed(3));
-    visibleSet.add(i);
-    if (reloadTimer) { clearTimeout(reloadTimer); reloadTimer = null; }
-    hint.style.display = 'none';
-  };
-  anchor.onTargetLost = () => {
-    console.log('[AR] BANNER LOST anchor:', i, 'visibleSet will be:', visibleSet.size - 1);
-    visibleSet.delete(i);
-    if (visibleSet.size === 0) {
-      CUBE_TOP.visible = false;
-      CUBE_BOT.visible = false;
-      currentHost = -1;
-      hint.textContent   = '📷 Point camera at the panels';
-      hint.style.display = 'block';
-      reloadTimer = setTimeout(() => location.reload(), 4000);
-    }
-  };
-});
-
-window.addEventListener('error', e => {
-  if (e.message?.includes('getProjectionMatrix')) e.preventDefault();
-}, true);
-
-await mindarThree.start();
-
+// ----------------------------------------------------------------- render loop
+const _mid = new THREE.Vector3();
 renderer.setAnimationLoop(() => {
-  if (visibleSet.size > 0) place();
-  if (CUBE_TOP.visible) {
-    CUBE_TOP.rotation.y += 0.012;
-    CUBE_BOT.rotation.y -= 0.012;
+  detectLoop(); // fire-and-forget; updates pos[] when it resolves
+
+  const a = pos[TAG_TL], b = pos[TAG_TR];
+  if (a && b) {
+    _mid.copy(a).add(b).multiplyScalar(0.5);
+    lastMid.copy(_mid); haveMid = true;
+    const edge = a.distanceTo(b) * 0.4; // cube scaled to tag gap
+    cube.scale.setScalar(Math.max(0.02, edge));
+    cube.position.lerp(_mid, LERP);
+    cube.visible = true;
+    hint.style.display = 'none';
+  } else if (SINGLE_TAG_FALLBACK && haveMid && (a || b)) {
+    cube.position.lerp(lastMid, LERP); // one tag visible: hold last midpoint
+    cube.visible = true;
+    hint.style.display = 'none';
+  } else {
+    cube.visible = false;
+    hint.style.display = 'block';
   }
+
+  if (cube.visible) cube.rotation.y += 0.012;
   renderer.render(scene, camera);
 });
+
+console.log('[AR] AprilTag tracker started. proc=%dx%d fx=%.1f tagsize=%.3fm',
+  PROC_W, PROC_H, fx, TAG_SIZE_M);
