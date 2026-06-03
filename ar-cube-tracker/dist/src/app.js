@@ -1,10 +1,11 @@
 // ---------------------------------------------------------------------------
 // AR Cube Tracker — AprilTag (tag36h11) pose tracking
 //
-// Detects two printed AprilTags (TL=id0, TR=id1), estimates each tag's metric
-// 6DoF pose via the apriltag WASM detector, and places a three.js cube at the
-// 3D midpoint between them. Robust under stage lighting (fiducial detection,
-// not photometric feature matching).
+// Detects printed AprilTags (TL=id0, TR=id1), estimates each tag's metric
+// 6DoF pose via the apriltag WASM detector, and locks a three.js cube exactly
+// onto each recognized tag (full position + orientation, resting on the tag
+// face). Robust under stage lighting (fiducial detection, not photometric
+// feature matching).
 //
 // Physical setup: print stage_TL_id0 + stage_TR_id1, mount flat, measure the
 // black-border size and set TAG_SIZE_M below.
@@ -26,8 +27,7 @@ const TAG_TR = 1;            // top-right stage tag id
 const TAG_SIZE_M = 0.20;     // printed black-border size in METERS (200 mm)
 const HFOV_DEG = 60;         // camera horizontal field of view (approx)
 const PROC_W = 960;          // detector processing width (px); smaller = faster
-const LERP = 0.25;           // cube position smoothing (0..1, higher = snappier)
-const SINGLE_TAG_FALLBACK = true; // if only one tag visible, hold last midpoint
+const LERP = 0.35;           // pose smoothing (0..1, higher = snappier lock)
 
 // ----------------------------------------------------------------- DOM / video
 const container = document.querySelector('#ar-container');
@@ -95,9 +95,16 @@ function makeCube(color, size) {
   return g;
 }
 
-const cube = makeCube(0x00ccff, 1); // unit cube, scaled per-frame to tag gap
-cube.visible = false;
-scene.add(cube);
+// one cube per stage tag, edge = tag width so it sits exactly over the tag
+const cubes = {
+  [TAG_TL]: makeCube(0x00ccff, TAG_SIZE_M), // cyan on TL
+  [TAG_TR]: makeCube(0xff6600, TAG_SIZE_M), // orange on TR
+};
+for (const id in cubes) {
+  cubes[id].matrixAutoUpdate = false; // we drive the matrix from tag pose
+  cubes[id].visible = false;
+  scene.add(cubes[id]);
+}
 
 // ----------------------------------------------------------------- detector
 // intrinsics at PROCESSING resolution (must match the image we feed detect())
@@ -112,15 +119,30 @@ await detector.set_camera_info(fx, fy, cx, cy);
 await detector.set_tag_size(TAG_TL, TAG_SIZE_M);
 await detector.set_tag_size(TAG_TR, TAG_SIZE_M);
 
-// AprilTag pose t = [x,y,z] in OpenCV cam coords (x right, y down, z forward).
-// three.js view space = (x right, y up, z toward viewer) -> flip y and z.
-function poseToVec3(t) { return new THREE.Vector3(t[0], -t[1], -t[2]); }
+// Convert an AprilTag pose (OpenCV cam coords: x right, y down, z fwd) to a
+// three.js world matrix (GL coords: x right, y up, z toward viewer). The change
+// of basis is C = diag(1,-1,-1); a transform maps as M_gl = C * M_cv * C.
+// R is stored COLUMN-MAJOR: R[j] is column j, R[j][i] is its row-i component.
+const _x = new THREE.Vector3(), _y = new THREE.Vector3(), _z = new THREE.Vector3();
+function poseToMatrix(R, t, out) {
+  _x.set( R[0][0], -R[0][1], -R[0][2]);          // tag X axis  (s0=+1)
+  _y.set(-R[1][0],  R[1][1],  R[1][2]);          // tag Y axis  (s1=-1)
+  _z.set(-R[2][0],  R[2][1],  R[2][2]);          // tag Z axis  (s2=-1, out of face)
+  out.makeBasis(_x, _y, _z);
+  // tag center in GL, lifted half a cube along the tag normal so the cube
+  // rests ON the printed face instead of straddling it.
+  const h = TAG_SIZE_M / 2;
+  out.setPosition(
+    t[0]      + _z.x * h,
+    -t[1]     + _z.y * h,
+    -t[2]     + _z.z * h,
+  );
+  return out;
+}
 
 const grayscale = new Uint8Array(PROC_W * PROC_H);
 let busy = false;
-const pos = { [TAG_TL]: null, [TAG_TR]: null };
-const lastMid = new THREE.Vector3();
-let haveMid = false;
+const pose = { [TAG_TL]: null, [TAG_TR]: null }; // latest {R,t} per tag
 
 async function detectLoop() {
   if (!detectorReady || busy) return;
@@ -132,10 +154,10 @@ async function detectLoop() {
       grayscale[j] = (px[i] + px[i + 1] + px[i + 2]) / 3;
     }
     const dets = await detector.detect(grayscale, PROC_W, PROC_H);
-    pos[TAG_TL] = pos[TAG_TR] = null;
+    pose[TAG_TL] = pose[TAG_TR] = null;
     for (const d of dets) {
-      if ((d.id === TAG_TL || d.id === TAG_TR) && d.pose && d.pose.t) {
-        pos[d.id] = poseToVec3(d.pose.t);
+      if ((d.id === TAG_TL || d.id === TAG_TR) && d.pose && d.pose.R && d.pose.t) {
+        pose[d.id] = { R: d.pose.R, t: d.pose.t };
       }
     }
   } catch (e) {
@@ -153,33 +175,46 @@ Object.assign(hint.style, {
   borderRadius:'28px', fontSize:'15px', fontFamily:'-apple-system,sans-serif',
   pointerEvents:'none', zIndex:'999', textAlign:'center', backdropFilter:'blur(8px)',
 });
-hint.textContent = '📷 Point camera at both AprilTags (id 0 + id 1)';
+hint.textContent = '📷 Point camera at an AprilTag (id 0 or id 1)';
 document.body.appendChild(hint);
 
 // ----------------------------------------------------------------- render loop
-const _mid = new THREE.Vector3();
+// Per-cube smoothing: decompose the target tag matrix, lerp position +
+// slerp rotation toward it so the cube locks on without frame-to-frame jitter.
+const _tgt = new THREE.Matrix4();
+const _tp = new THREE.Vector3(), _tq = new THREE.Quaternion(), _ts = new THREE.Vector3();
+const _cp = new THREE.Vector3(), _cq = new THREE.Quaternion(), _cs = new THREE.Vector3();
+const tracked = {}; // id -> true once first locked (skip smoothing on first frame)
+
 renderer.setAnimationLoop(() => {
-  detectLoop(); // fire-and-forget; updates pos[] when it resolves
+  detectLoop(); // fire-and-forget; updates pose[] when it resolves
 
-  const a = pos[TAG_TL], b = pos[TAG_TR];
-  if (a && b) {
-    _mid.copy(a).add(b).multiplyScalar(0.5);
-    lastMid.copy(_mid); haveMid = true;
-    const edge = a.distanceTo(b) * 0.4; // cube scaled to tag gap
-    cube.scale.setScalar(Math.max(0.02, edge));
-    cube.position.lerp(_mid, LERP);
+  let anyVisible = false;
+  for (const id of [TAG_TL, TAG_TR]) {
+    const cube = cubes[id];
+    const p = pose[id];
+    if (!p) { cube.visible = false; continue; }
+
+    poseToMatrix(p.R, p.t, _tgt);
+    _tgt.decompose(_tp, _tq, _ts);
+
+    if (!tracked[id]) {            // snap exactly on first detection
+      cube.matrix.copy(_tgt);
+      tracked[id] = true;
+    } else {                       // then ease toward the tag pose
+      cube.matrix.decompose(_cp, _cq, _cs);
+      _cp.lerp(_tp, LERP);
+      _cq.slerp(_tq, LERP);
+      cube.matrix.compose(_cp, _cq, _ts);
+    }
     cube.visible = true;
-    hint.style.display = 'none';
-  } else if (SINGLE_TAG_FALLBACK && haveMid && (a || b)) {
-    cube.position.lerp(lastMid, LERP); // one tag visible: hold last midpoint
-    cube.visible = true;
-    hint.style.display = 'none';
-  } else {
-    cube.visible = false;
-    hint.style.display = 'block';
+    anyVisible = true;
   }
+  // drop the lock once a tag is gone, so it re-snaps cleanly when seen again
+  if (!pose[TAG_TL]) tracked[TAG_TL] = false;
+  if (!pose[TAG_TR]) tracked[TAG_TR] = false;
 
-  if (cube.visible) cube.rotation.y += 0.012;
+  hint.style.display = anyVisible ? 'none' : 'block';
   renderer.render(scene, camera);
 });
 
