@@ -53,7 +53,7 @@ const TAG_SIZE = {            // printed black-border size in METERS, per id
 const HFOV_DEG = 60;         // camera horizontal field of view (approx)
 const PROC_W = 960;          // detector processing width (px); smaller = faster
 const LERP = 0.35;           // pose smoothing (0..1, higher = snappier lock)
-const BUILD = 'apriltag-2026-06-03-f';  // bump to confirm the live build changed
+const BUILD = 'apriltag-2026-06-03-g';  // bump to confirm the live build changed
 
 // ----------------------------------------------------------------- debug HUD
 // Created FIRST, before any await, so even an early failure is visible on phone
@@ -158,6 +158,22 @@ for (const id of TAG_IDS) {
   cubes[id].visible = false;
   scene.add(cubes[id]);
 }
+
+// ----------------------------------------------------------- triangulation
+// HERO mode marker: ONE large bright-white WIREFRAME cube (no solid faces, so
+// it reads as distinct from the per-tag solid cubes) parked at the centroid of
+// the core coffin triangle id0+id1+id2.
+const TRI_IDS = [0, 1, 2];          // coffin triangle drivers (id3-8 ignored)
+const HERO_SIZE = 0.25;             // marker edge in metres (big, obvious)
+function makeWireCube(size, color) {
+  return new THREE.LineSegments(
+    new THREE.EdgesGeometry(new THREE.BoxGeometry(size, size, size)),
+    new THREE.LineBasicMaterial({ color })
+  );
+}
+const heroMarker = makeWireCube(HERO_SIZE, 0xffffff);
+heroMarker.visible = false;
+scene.add(heroMarker);
 
 // ----------------------------------------------------------------- detector
 // intrinsics at PROCESSING resolution (must match the image we feed detect())
@@ -275,6 +291,43 @@ Object.assign(hint.style, {
 hint.textContent = '📷 Point camera at an AprilTag (id 0–8)';
 document.body.appendChild(hint);
 
+// ----------------------------------------------------------------- mode toggle
+// Two big touch targets bottom-centre. ALL TAGS = per-tag colored cubes (Task 2
+// behaviour). HERO = hide those, show only the triangulation marker. Active
+// button highlighted. Mode persists until tapped again. Default ALL.
+let MODE = 'ALL';                   // 'ALL' | 'HERO'
+
+const modeBar = document.createElement('div');
+Object.assign(modeBar.style, {
+  position:'fixed', bottom:'24px', left:'50%', transform:'translateX(-50%)',
+  display:'flex', gap:'12px', zIndex:'1001', pointerEvents:'auto',
+});
+function makeModeBtn(label) {
+  const b = document.createElement('button');
+  b.textContent = label;
+  Object.assign(b.style, {
+    minWidth:'140px', minHeight:'56px', padding:'0 22px',
+    fontSize:'17px', fontWeight:'700', fontFamily:'-apple-system,sans-serif',
+    border:'2px solid #fff', borderRadius:'28px', cursor:'pointer',
+    touchAction:'manipulation', WebkitTapHighlightColor:'transparent',
+  });
+  return b;
+}
+const btnAll = makeModeBtn('ALL TAGS');
+const btnHero = makeModeBtn('HERO');
+function paintMode() {
+  const on  = { background:'#fff', color:'#000' };
+  const off = { background:'rgba(0,0,0,0.6)', color:'#fff' };
+  Object.assign(btnAll.style,  MODE === 'ALL'  ? on : off);
+  Object.assign(btnHero.style, MODE === 'HERO' ? on : off);
+}
+btnAll.addEventListener('click', () => { MODE = 'ALL';  paintMode(); });
+btnHero.addEventListener('click', () => { MODE = 'HERO'; paintMode(); });
+modeBar.appendChild(btnAll);
+modeBar.appendChild(btnHero);
+document.body.appendChild(modeBar);
+paintMode();
+
 // ----------------------------------------------------------------- render loop
 // Drive each cube's position + quaternion (NOT raw matrix) so three keeps the
 // world matrix in sync. Snap on first detection, then lerp/slerp toward pose.
@@ -308,10 +361,26 @@ renderer.setAnimationLoop(() => {
       cube.position.lerp(_tp, LERP);
       cube.quaternion.slerp(_tq, LERP);
     }
-    cube.visible = true;
-    anyVisible = true;
+    cube.visible = (MODE === 'ALL'); // per-tag cubes only in ALL TAGS mode
+    anyVisible = true;               // a tag is detected (mode-independent)
     seen.push(id);
   }
+
+  // ---- HERO triangulation: centroid of coffin triangle id0+id1+id2 ----
+  const triMissing = TRI_IDS.filter((id) => !pose[id]);
+  let triLine;
+  if (triMissing.length === 0) {     // all three visible -> place marker
+    let sx = 0, sy = 0, sz = 0;
+    for (const id of TRI_IDS) {      // tag-center world pos (GL change of basis)
+      const t = pose[id].t;
+      sx += t[0]; sy += -t[1]; sz += -t[2];
+    }
+    heroMarker.position.set(sx / 3, sy / 3, sz / 3);
+    triLine = 'TRIANGLE: id0 id1 id2 — centroid locked';
+  } else {
+    triLine = `TRIANGLE INCOMPLETE: missing ${triMissing.map((i) => 'id' + i).join(' ')}`;
+  }
+  heroMarker.visible = (MODE === 'HERO' && triMissing.length === 0);
 
   hint.style.display = anyVisible ? 'none' : 'block';
 
@@ -322,7 +391,9 @@ renderer.setAnimationLoop(() => {
     `detector ${detectorReady ? 'READY' : '...'}  det@${detFps.toFixed(0)}fps  f#${frameN}`,
     `proc ${PROC_W}x${PROC_H}  ids 0–8  hfov ${HFOV_DEG}`,
     detErr ? `DETECT ERR: ${detErr}` : `detections: ${lastDets.length}`,
+    `MODE: ${MODE}`,
     `DETECTED IDs: ${seen.length ? seen.join(' ') : '(none)'}`,
+    triLine,
     '─ tags seen ─',
   ];
   if (lastDets.length === 0) {
@@ -336,7 +407,9 @@ renderer.setAnimationLoop(() => {
       );
     }
   }
-  lines.push(`─ cubes locked: ${seen.length} ─`);
+  lines.push(MODE === 'HERO'
+    ? `─ hero marker: ${heroMarker.visible ? 'PLACED' : 'waiting 3 tags'} ─`
+    : `─ cubes locked: ${seen.length} ─`);
   setDbg(lines);
 
   renderer.render(scene, camera);
