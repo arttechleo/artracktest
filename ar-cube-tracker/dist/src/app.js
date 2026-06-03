@@ -101,7 +101,6 @@ const cubes = {
   [TAG_TR]: makeCube(0xff6600, TAG_SIZE_M), // orange on TR
 };
 for (const id in cubes) {
-  cubes[id].matrixAutoUpdate = false; // we drive the matrix from tag pose
   cubes[id].visible = false;
   scene.add(cubes[id]);
 }
@@ -140,6 +139,19 @@ function poseToMatrix(R, t, out) {
   return out;
 }
 
+// ----------------------------------------------------------------- debug HUD
+// On-phone there is no console, so mirror detection state to an on-screen panel.
+const dbg = document.createElement('div');
+Object.assign(dbg.style, {
+  position:'fixed', top:'8px', left:'8px', zIndex:'1000',
+  color:'#0f0', background:'rgba(0,0,0,0.7)', padding:'8px 10px',
+  font:'12px/1.4 monospace', whiteSpace:'pre', borderRadius:'6px',
+  pointerEvents:'none', maxWidth:'70vw',
+});
+document.body.appendChild(dbg);
+let frameN = 0, lastDetN = 0;
+function setDbg(lines) { dbg.textContent = lines.join('\n'); }
+
 const grayscale = new Uint8Array(PROC_W * PROC_H);
 let busy = false;
 const pose = { [TAG_TL]: null, [TAG_TR]: null }; // latest {R,t} per tag
@@ -154,14 +166,23 @@ async function detectLoop() {
       grayscale[j] = (px[i] + px[i + 1] + px[i + 2]) / 3;
     }
     const dets = await detector.detect(grayscale, PROC_W, PROC_H);
+    lastDetN = dets.length;
     pose[TAG_TL] = pose[TAG_TR] = null;
+    const seen = [];
     for (const d of dets) {
+      seen.push(`id${d.id}`);
       if ((d.id === TAG_TL || d.id === TAG_TR) && d.pose && d.pose.R && d.pose.t) {
         pose[d.id] = { R: d.pose.R, t: d.pose.t };
+        const t = d.pose.t;
+        console.log(`[AR] RECOGNIZED tag id=${d.id} t=[${t.map(v=>v.toFixed(3))}] dist=${Math.hypot(...t).toFixed(2)}m`);
       }
+    }
+    if (dets.length) {
+      console.log(`[AR] frame#${frameN} detections=${dets.length} ids=${seen.join(',')}`);
     }
   } catch (e) {
     console.warn('[AR] detect error', e);
+    setDbg(['DETECT ERROR:', String(e)]);
   } finally {
     busy = false;
   }
@@ -179,14 +200,14 @@ hint.textContent = '📷 Point camera at an AprilTag (id 0 or id 1)';
 document.body.appendChild(hint);
 
 // ----------------------------------------------------------------- render loop
-// Per-cube smoothing: decompose the target tag matrix, lerp position +
-// slerp rotation toward it so the cube locks on without frame-to-frame jitter.
+// Drive each cube's position + quaternion (NOT raw matrix) so three keeps the
+// world matrix in sync. Snap on first detection, then lerp/slerp toward pose.
 const _tgt = new THREE.Matrix4();
 const _tp = new THREE.Vector3(), _tq = new THREE.Quaternion(), _ts = new THREE.Vector3();
-const _cp = new THREE.Vector3(), _cq = new THREE.Quaternion(), _cs = new THREE.Vector3();
 const tracked = {}; // id -> true once first locked (skip smoothing on first frame)
 
 renderer.setAnimationLoop(() => {
+  frameN++;
   detectLoop(); // fire-and-forget; updates pose[] when it resolves
 
   let anyVisible = false;
@@ -198,14 +219,13 @@ renderer.setAnimationLoop(() => {
     poseToMatrix(p.R, p.t, _tgt);
     _tgt.decompose(_tp, _tq, _ts);
 
-    if (!tracked[id]) {            // snap exactly on first detection
-      cube.matrix.copy(_tgt);
+    if (!tracked[id]) {              // snap exactly on first detection
+      cube.position.copy(_tp);
+      cube.quaternion.copy(_tq);
       tracked[id] = true;
-    } else {                       // then ease toward the tag pose
-      cube.matrix.decompose(_cp, _cq, _cs);
-      _cp.lerp(_tp, LERP);
-      _cq.slerp(_tq, LERP);
-      cube.matrix.compose(_cp, _cq, _ts);
+    } else {                        // then ease toward the tag pose
+      cube.position.lerp(_tp, LERP);
+      cube.quaternion.slerp(_tq, LERP);
     }
     cube.visible = true;
     anyVisible = true;
@@ -215,8 +235,21 @@ renderer.setAnimationLoop(() => {
   if (!pose[TAG_TR]) tracked[TAG_TR] = false;
 
   hint.style.display = anyVisible ? 'none' : 'block';
+
+  // live debug panel (visible on phone)
+  const tl = pose[TAG_TL], tr = pose[TAG_TR];
+  setDbg([
+    `detector: ${detectorReady ? 'READY' : 'loading...'}`,
+    `proc: ${PROC_W}x${PROC_H}  frame#${frameN}`,
+    `detections: ${lastDetN}`,
+    `TL id0: ${tl ? 'LOCK d='+Math.hypot(...tl.t).toFixed(2)+'m' : '—'}`,
+    `TR id1: ${tr ? 'LOCK d='+Math.hypot(...tr.t).toFixed(2)+'m' : '—'}`,
+    `cube: ${anyVisible ? 'VISIBLE' : 'hidden'}`,
+  ]);
+
   renderer.render(scene, camera);
 });
 
 console.log('[AR] AprilTag tracker started. proc=%dx%d fx=%.1f tagsize=%.3fm',
   PROC_W, PROC_H, fx, TAG_SIZE_M);
+setDbg(['detector: loading...', 'point camera at AprilTag id0/id1']);
