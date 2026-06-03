@@ -53,7 +53,7 @@ const TAG_SIZE = {            // printed black-border size in METERS, per id
 const HFOV_DEG = 60;         // camera horizontal field of view (approx)
 const PROC_W = 960;          // detector processing width (px); smaller = faster
 const LERP = 0.35;           // pose smoothing (0..1, higher = snappier lock)
-const BUILD = 'apriltag-2026-06-03-g';  // bump to confirm the live build changed
+const BUILD = 'apriltag-2026-06-03-h';  // bump to confirm the live build changed
 
 // ----------------------------------------------------------------- debug HUD
 // Created FIRST, before any await, so even an early failure is visible on phone
@@ -160,18 +160,28 @@ for (const id of TAG_IDS) {
 }
 
 // ----------------------------------------------------------- triangulation
-// HERO mode marker: ONE large bright-white WIREFRAME cube (no solid faces, so
-// it reads as distinct from the per-tag solid cubes) parked at the centroid of
-// the core coffin triangle id0+id1+id2.
+// HERO mode marker: ONE solid gold square-base PYRAMID, apex pointing UP in
+// world space (stands upright on the stage, never tilts with the tags), parked
+// at the centroid of the core coffin triangle id0+id1+id2.
 const TRI_IDS = [0, 1, 2];          // coffin triangle drivers (id3-8 ignored)
-const HERO_SIZE = 0.25;             // marker edge in metres (big, obvious)
-function makeWireCube(size, color) {
-  return new THREE.LineSegments(
-    new THREE.EdgesGeometry(new THREE.BoxGeometry(size, size, size)),
-    new THREE.LineBasicMaterial({ color })
-  );
+const HERO_BASE = 0.25;             // base width in metres
+const HERO_HEIGHT = 0.35;           // apex height in metres
+function makeHeroPyramid() {
+  // 4-radial-segment cone = square-base pyramid; cone apex defaults to +Y.
+  const radius = HERO_BASE / Math.SQRT2;   // base edge ~= HERO_BASE
+  const geo = new THREE.ConeGeometry(radius, HERO_HEIGHT, 4);
+  const g = new THREE.Group();
+  g.add(new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
+    color: 0xffaa00, emissive: 0xffaa00, emissiveIntensity: 0.35,
+    roughness: 0.25, metalness: 0.6, flatShading: true,
+  })));
+  g.add(new THREE.LineSegments(            // crisp white silhouette
+    new THREE.EdgesGeometry(geo),
+    new THREE.LineBasicMaterial({ color: 0xffffff })
+  ));
+  return g;
 }
-const heroMarker = makeWireCube(HERO_SIZE, 0xffffff);
+const heroMarker = makeHeroPyramid();
 heroMarker.visible = false;
 scene.add(heroMarker);
 
@@ -376,6 +386,7 @@ renderer.setAnimationLoop(() => {
       sx += t[0]; sy += -t[1]; sz += -t[2];
     }
     heroMarker.position.set(sx / 3, sy / 3, sz / 3);
+    heroMarker.rotation.y += 0.02;   // gentle live spin; apex stays world-up
     triLine = 'TRIANGLE: id0 id1 id2 — centroid locked';
   } else {
     triLine = `TRIANGLE INCOMPLETE: missing ${triMissing.map((i) => 'id' + i).join(' ')}`;
