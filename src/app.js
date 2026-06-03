@@ -53,7 +53,8 @@ const TAG_SIZE = {            // printed black-border size in METERS, per id
 const HFOV_DEG = 60;         // camera horizontal field of view (approx)
 const PROC_W = 960;          // detector processing width (px); smaller = faster
 const LERP = 0.35;           // pose smoothing (0..1, higher = snappier lock)
-const BUILD = 'apriltag-2026-06-03-h';  // bump to confirm the live build changed
+const COFFIN_BIAS = 0.5;     // hero pos: 0 = plain centroid, 1 = exactly on id2 (coffin)
+const BUILD = 'apriltag-2026-06-03-j';  // bump to confirm the live build changed
 
 // ----------------------------------------------------------------- debug HUD
 // Created FIRST, before any await, so even an early failure is visible on phone
@@ -343,6 +344,7 @@ paintMode();
 // world matrix in sync. Snap on first detection, then lerp/slerp toward pose.
 const _tgt = new THREE.Matrix4();
 const _tp = new THREE.Vector3(), _tq = new THREE.Quaternion(), _ts = new THREE.Vector3();
+const _hp = new THREE.Vector3(), _p2 = new THREE.Vector3(); // hero centroid + id2 pos
 const tracked = {}; // id -> true once first locked (skip smoothing on first frame)
 
 renderer.setAnimationLoop(() => {
@@ -385,8 +387,14 @@ renderer.setAnimationLoop(() => {
       const t = pose[id].t;
       sx += t[0]; sy += -t[1]; sz += -t[2];
     }
-    heroMarker.position.set(sx / 3, sy / 3, sz / 3);
-    heroMarker.rotation.y += 0.02;   // gentle live spin; apex stays world-up
+    _hp.set(sx / 3, sy / 3, sz / 3); // plain centroid
+    const t2 = pose[2].t;            // id2 (coffin) world pos
+    _p2.set(t2[0], -t2[1], -t2[2]);
+    _hp.lerp(_p2, COFFIN_BIAS);      // bias centroid -> id2
+    heroMarker.position.copy(_hp);
+    // FORCE world-upright every frame: apex = world +Y, x/z rotation zeroed so
+    // no camera/tag/parent tilt can leak in. Only motion = gentle Y-axis spin.
+    heroMarker.rotation.set(0, heroMarker.rotation.y + 0.02, 0);
     triLine = 'TRIANGLE: id0 id1 id2 — centroid locked';
   } else {
     triLine = `TRIANGLE INCOMPLETE: missing ${triMissing.map((i) => 'id' + i).join(' ')}`;
@@ -405,6 +413,7 @@ renderer.setAnimationLoop(() => {
     `MODE: ${MODE}`,
     `DETECTED IDs: ${seen.length ? seen.join(' ') : '(none)'}`,
     triLine,
+    `BIAS: ${COFFIN_BIAS.toFixed(2)} → coffin`,
     '─ tags seen ─',
   ];
   if (lastDets.length === 0) {
