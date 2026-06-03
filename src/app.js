@@ -1,14 +1,14 @@
 // ---------------------------------------------------------------------------
 // AR Cube Tracker — AprilTag (tag36h11) pose tracking
 //
-// Detects printed AprilTags (TL=id0, TR=id1), estimates each tag's metric
-// 6DoF pose via the apriltag WASM detector, and locks a three.js cube exactly
-// onto each recognized tag (full position + orientation, resting on the tag
-// face). Robust under stage lighting (fiducial detection, not photometric
-// feature matching).
+// Detects printed AprilTags id 0..8, estimates each tag's metric 6DoF pose via
+// the apriltag WASM detector, and locks a three.js cube exactly onto each
+// recognized tag (full position + orientation, resting on the tag face), one
+// fixed colour per id. Robust under stage lighting (fiducial detection, not
+// photometric feature matching).
 //
-// Physical setup: print stage_TL_id0 + stage_TR_id1, mount flat, measure the
-// black-border size and set TAG_SIZE_M below.
+// Physical setup: print the tags, mount flat, measure each black-border size
+// and set it in the TAG_SIZE map below (per id, in metres).
 // ---------------------------------------------------------------------------
 
 // Force rear camera at 1080p
@@ -22,13 +22,38 @@ import * as THREE from 'three';
 import * as Comlink from '/apriltag/comlink.mjs';
 
 // ----------------------------------------------------------------- tunables
-const TAG_TL = 0;            // top-left  stage tag id
-const TAG_TR = 1;            // top-right stage tag id
-const TAG_SIZE_M = 0.20;     // printed black-border size in METERS (200 mm)
+// Detect every AprilTag id 0..8. Each id has a FIXED colour (keyed to id, same
+// every frame) and its own physical black-border size in METERS used for pose.
+const TAG_IDS = [0, 1, 2, 3, 4, 5, 6, 7, 8];
+
+const TAG_COLOR = {            // fixed per-id (hex), never random per-frame
+  0: 0xff0000,  // red
+  1: 0x00ff00,  // green
+  2: 0x0000ff,  // blue
+  3: 0xffff00,  // yellow
+  4: 0xff00ff,  // magenta
+  5: 0x00ffff,  // cyan
+  6: 0xff8000,  // orange
+  7: 0x800080,  // purple
+  8: 0xffffff,  // white
+};
+
+const TAG_SIZE = {            // printed black-border size in METERS, per id
+  0: 0.125,     // MEASURE-ON-STAGE placeholder
+  1: 0.125,     // MEASURE-ON-STAGE placeholder
+  2: 0.1143,    // measured
+  3: 0.10,      // placeholder
+  4: 0.10,      // placeholder
+  5: 0.10,      // placeholder
+  6: 0.10,      // placeholder
+  7: 0.10,      // placeholder
+  8: 0.10,      // placeholder
+};
+
 const HFOV_DEG = 60;         // camera horizontal field of view (approx)
 const PROC_W = 960;          // detector processing width (px); smaller = faster
 const LERP = 0.35;           // pose smoothing (0..1, higher = snappier lock)
-const BUILD = 'apriltag-2026-06-02-e';  // bump to confirm the live build changed
+const BUILD = 'apriltag-2026-06-03-f';  // bump to confirm the live build changed
 
 // ----------------------------------------------------------------- debug HUD
 // Created FIRST, before any await, so even an early failure is visible on phone
@@ -125,12 +150,11 @@ function makeCube(color, size) {
   return g;
 }
 
-// one cube per stage tag, edge = tag width so it sits exactly over the tag
-const cubes = {
-  [TAG_TL]: makeCube(0x00ccff, TAG_SIZE_M), // cyan on TL
-  [TAG_TR]: makeCube(0xff6600, TAG_SIZE_M), // orange on TR
-};
-for (const id in cubes) {
+// one cube per tag id, edge = that tag's width so it sits exactly over the tag,
+// coloured by the fixed per-id palette
+const cubes = {};
+for (const id of TAG_IDS) {
+  cubes[id] = makeCube(TAG_COLOR[id], TAG_SIZE[id]);
   cubes[id].visible = false;
   scene.add(cubes[id]);
 }
@@ -155,8 +179,7 @@ try {
   await ready;                       // WASM fully initialized + cwraps bound
   detectorReady = true;
   await detector.set_camera_info(fx, fy, cx, cy);
-  await detector.set_tag_size(TAG_TL, TAG_SIZE_M);
-  await detector.set_tag_size(TAG_TR, TAG_SIZE_M);
+  for (const id of TAG_IDS) await detector.set_tag_size(id, TAG_SIZE[id]);
 } catch (e) {
   setDbg([`BUILD ${BUILD}`, 'DETECTOR LOAD FAILED:', String(e.message || e),
           '(check /apriltag/*.js + .wasm served)']);
@@ -168,14 +191,14 @@ try {
 // of basis is C = diag(1,-1,-1); a transform maps as M_gl = C * M_cv * C.
 // R is stored COLUMN-MAJOR: R[j] is column j, R[j][i] is its row-i component.
 const _x = new THREE.Vector3(), _y = new THREE.Vector3(), _z = new THREE.Vector3();
-function poseToMatrix(R, t, out) {
+function poseToMatrix(R, t, size, out) {
   _x.set( R[0][0], -R[0][1], -R[0][2]);          // tag X axis  (s0=+1)
   _y.set(-R[1][0],  R[1][1],  R[1][2]);          // tag Y axis  (s1=-1)
   _z.set(-R[2][0],  R[2][1],  R[2][2]);          // tag Z axis  (s2=-1, out of face)
   out.makeBasis(_x, _y, _z);
   // tag center in GL, lifted half a cube along the tag normal so the cube
   // rests ON the printed face instead of straddling it.
-  const h = TAG_SIZE_M / 2;
+  const h = size / 2;
   out.setPosition(
     t[0]      + _z.x * h,
     -t[1]     + _z.y * h,
@@ -190,7 +213,8 @@ let detErr = null;
 
 const grayscale = new Uint8Array(PROC_W * PROC_H);
 let busy = false;
-const pose = { [TAG_TL]: null, [TAG_TR]: null }; // latest {R,t} per tag
+const pose = {};                          // id -> latest {R,t}
+for (const id of TAG_IDS) pose[id] = null;
 
 async function detectLoop() {
   if (!detectorReady || busy) return;
@@ -208,12 +232,12 @@ async function detectLoop() {
     detFps = 1000 / Math.max(1, now - lastDetT);
     lastDetT = now;
 
-    pose[TAG_TL] = pose[TAG_TR] = null;
+    for (const id of TAG_IDS) pose[id] = null;
     lastDets = dets.map((d) => {
       const t = d.pose && d.pose.t;
       return {
         id: d.id,
-        known: (d.id === TAG_TL || d.id === TAG_TR),
+        known: (d.id in TAG_SIZE),
         margin: (d.decision_margin ?? d.margin),          // detector confidence
         hamming: d.hamming,                                // bit errors corrected
         dist: t ? Math.hypot(t[0], t[1], t[2]) : null,     // metres from camera
@@ -223,7 +247,7 @@ async function detectLoop() {
       };
     });
     for (const d of dets) {
-      if ((d.id === TAG_TL || d.id === TAG_TR) && d.pose && d.pose.R && d.pose.t) {
+      if ((d.id in TAG_SIZE) && d.pose && d.pose.R && d.pose.t) {
         pose[d.id] = { R: d.pose.R, t: d.pose.t };
       }
     }
@@ -248,7 +272,7 @@ Object.assign(hint.style, {
   borderRadius:'28px', fontSize:'15px', fontFamily:'-apple-system,sans-serif',
   pointerEvents:'none', zIndex:'999', textAlign:'center', backdropFilter:'blur(8px)',
 });
-hint.textContent = '📷 Point camera at an AprilTag (id 0 or id 1)';
+hint.textContent = '📷 Point camera at an AprilTag (id 0–8)';
 document.body.appendChild(hint);
 
 // ----------------------------------------------------------------- render loop
@@ -263,15 +287,20 @@ renderer.setAnimationLoop(() => {
   detectLoop(); // fire-and-forget; updates pose[] when it resolves
 
   let anyVisible = false;
-  for (const id of [TAG_TL, TAG_TR]) {
+  const seen = [];                  // ids with a live pose this frame
+  for (const id of TAG_IDS) {
     const cube = cubes[id];
     const p = pose[id];
-    if (!p) { cube.visible = false; continue; }
+    if (!p) {                       // gone -> hide + drop lock so it re-snaps
+      cube.visible = false;
+      tracked[id] = false;
+      continue;
+    }
 
-    poseToMatrix(p.R, p.t, _tgt);
+    poseToMatrix(p.R, p.t, TAG_SIZE[id], _tgt);
     _tgt.decompose(_tp, _tq, _ts);
 
-    if (!tracked[id]) {              // snap exactly on first detection
+    if (!tracked[id]) {             // snap exactly on first detection
       cube.position.copy(_tp);
       cube.quaternion.copy(_tq);
       tracked[id] = true;
@@ -281,21 +310,19 @@ renderer.setAnimationLoop(() => {
     }
     cube.visible = true;
     anyVisible = true;
+    seen.push(id);
   }
-  // drop the lock once a tag is gone, so it re-snaps cleanly when seen again
-  if (!pose[TAG_TL]) tracked[TAG_TL] = false;
-  if (!pose[TAG_TR]) tracked[TAG_TR] = false;
 
   hint.style.display = anyVisible ? 'none' : 'block';
 
   // ---- thorough recognition HUD (visible on phone) ----
-  const tl = pose[TAG_TL], tr = pose[TAG_TR];
   const fmt = (n, d = 2) => (n == null ? '—' : Number(n).toFixed(d));
   const lines = [
     `BUILD ${BUILD}`,
     `detector ${detectorReady ? 'READY' : '...'}  det@${detFps.toFixed(0)}fps  f#${frameN}`,
-    `proc ${PROC_W}x${PROC_H}  tag ${TAG_SIZE_M}m  hfov ${HFOV_DEG}`,
+    `proc ${PROC_W}x${PROC_H}  ids 0–8  hfov ${HFOV_DEG}`,
     detErr ? `DETECT ERR: ${detErr}` : `detections: ${lastDets.length}`,
+    `DETECTED IDs: ${seen.length ? seen.join(' ') : '(none)'}`,
     '─ tags seen ─',
   ];
   if (lastDets.length === 0) {
@@ -309,15 +336,12 @@ renderer.setAnimationLoop(() => {
       );
     }
   }
-  lines.push('─ cube lock ─');
-  lines.push(`  TL id0: ${tl ? 'LOCK d=' + fmt(Math.hypot(...tl.t)) + 'm' : '—'}`);
-  lines.push(`  TR id1: ${tr ? 'LOCK d=' + fmt(Math.hypot(...tr.t)) + 'm' : '—'}`);
-  lines.push(`  cube: ${anyVisible ? 'VISIBLE' : 'hidden'}`);
+  lines.push(`─ cubes locked: ${seen.length} ─`);
   setDbg(lines);
 
   renderer.render(scene, camera);
 });
 
-console.log('[AR] AprilTag tracker started. proc=%dx%d fx=%.1f tagsize=%.3fm',
-  PROC_W, PROC_H, fx, TAG_SIZE_M);
-setDbg(['detector: loading...', 'point camera at AprilTag id0/id1']);
+console.log('[AR] AprilTag tracker started. proc=%dx%d fx=%.1f ids=%s',
+  PROC_W, PROC_H, fx, TAG_IDS.join(','));
+setDbg(['detector: loading...', 'point camera at AprilTag id 0–8']);

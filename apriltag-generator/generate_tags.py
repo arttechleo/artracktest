@@ -281,6 +281,48 @@ def _save_stage_pdf(rendered: dict, args) -> None:
     print(f"  pdf -> {os.path.relpath(out, OUT_ROOT)}")
 
 
+# ------------------------------------------------------------------ explicit ids
+def save_tag_pdf(path: str, img: np.ndarray, family: str, tag_id: int,
+                 size_mm: float) -> None:
+    """One tag on one page, labelled, for crew to print + mount."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    side_in = size_mm / MM_PER_INCH
+    fig = plt.figure(figsize=(side_in + 1, side_in + 1.5), dpi=DEFAULT_DPI)
+    ax = fig.add_axes([0.05, 0.1, 0.9, 0.8])
+    ax.imshow(img, cmap="gray", vmin=0, vmax=255, interpolation="nearest")
+    ax.axis("off")
+    fig.text(0.5, 0.95, f"id {tag_id}  {family}", ha="center",
+             fontsize=14, weight="bold")
+    fig.text(0.5, 0.04, f"print at {size_mm} mm border", ha="center", fontsize=9)
+    fig.savefig(path, dpi=DEFAULT_DPI, format="pdf")
+    plt.close(fig)
+
+
+def run_ids_mode(args) -> None:
+    """Render each explicit ID as an individual PNG (+ optional PDF/SVG)."""
+    print(f"[ids] family={args.family} ids={args.ids} size={args.size}mm "
+          f"dpi={args.dpi}")
+    for tag_id in args.ids:
+        bits = make_tag_bits(args.family, tag_id)
+        img = render_tag_png(bits, args.size, args.dpi, args.quiet)
+        if args.qr:
+            img = overlay_qr(img, f"{args.family}:{tag_id}")
+        png = os.path.join(OUT_TAGS, f"{args.family}_id{tag_id:03d}.png")
+        save_png(png, img, args.dpi)
+        print(f"  png -> {os.path.relpath(png)}")
+        if args.svg:
+            svg = os.path.join(OUT_TAGS, f"{args.family}_id{tag_id:03d}.svg")
+            save_svg(svg, bits, args.quiet)
+            print(f"  svg -> {os.path.relpath(svg)}")
+        if args.pdf:
+            pdf = os.path.join(OUT_TAGS, f"{args.family}_id{tag_id:03d}.pdf")
+            save_tag_pdf(pdf, img, args.family, tag_id, args.size)
+            print(f"  pdf -> {os.path.relpath(pdf)}")
+
+
 # ------------------------------------------------------------------ normal mode
 def run_grid_mode(args) -> None:
     n_tags = args.num if args.num else args.rows * args.cols
@@ -324,6 +366,9 @@ def parse_args(argv=None):
     p.add_argument("--cols", type=int, default=6)
     p.add_argument("--num", type=int, default=0,
                    help="explicit tag count (overrides rows*cols if set)")
+    p.add_argument("--ids", type=int, nargs="+", default=None,
+                   help="explicit tag IDs to render individually (PNG + per-tag "
+                        "PDF), no board. e.g. --ids 6 7 8")
     p.add_argument("--size", type=float, default=50.0,
                    help="tag black-border size in mm")
     p.add_argument("--dpi", type=int, default=DEFAULT_DPI,
@@ -350,6 +395,8 @@ def main(argv=None):
         os.makedirs(d, exist_ok=True)
     if args.stage_mode:
         run_stage_mode(args)
+    elif args.ids:
+        run_ids_mode(args)
     else:
         run_grid_mode(args)
 
