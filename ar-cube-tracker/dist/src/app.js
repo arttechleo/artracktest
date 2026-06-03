@@ -28,6 +28,27 @@ const TAG_SIZE_M = 0.20;     // printed black-border size in METERS (200 mm)
 const HFOV_DEG = 60;         // camera horizontal field of view (approx)
 const PROC_W = 960;          // detector processing width (px); smaller = faster
 const LERP = 0.35;           // pose smoothing (0..1, higher = snappier lock)
+const BUILD = 'apriltag-2026-06-02-d';  // bump to confirm the live build changed
+
+// ----------------------------------------------------------------- debug HUD
+// Created FIRST, before any await, so even an early failure is visible on phone
+// (no console there). Global error hooks mirror crashes onto the screen.
+const dbg = document.createElement('div');
+Object.assign(dbg.style, {
+  position:'fixed', top:'8px', left:'8px', zIndex:'1000',
+  color:'#0f0', background:'rgba(0,0,0,0.78)', padding:'8px 10px',
+  font:'12px/1.4 monospace', whiteSpace:'pre', borderRadius:'6px',
+  pointerEvents:'none', maxWidth:'78vw',
+});
+document.body.appendChild(dbg);
+function setDbg(lines) { dbg.textContent = (Array.isArray(lines) ? lines : [lines]).join('\n'); }
+setDbg([`BUILD ${BUILD}`, 'booting...']);
+window.addEventListener('error', (e) => {
+  setDbg([`BUILD ${BUILD}`, 'JS ERROR:', String(e.message || e.error || e)]);
+});
+window.addEventListener('unhandledrejection', (e) => {
+  setDbg([`BUILD ${BUILD}`, 'PROMISE REJECT:', String(e.reason && e.reason.message || e.reason)]);
+});
 
 // ----------------------------------------------------------------- DOM / video
 const container = document.querySelector('#ar-container');
@@ -36,11 +57,20 @@ video.setAttribute('playsinline', '');
 video.muted = true;
 container.appendChild(video);
 
-const stream = await navigator.mediaDevices.getUserMedia({
-  video: { facingMode: { ideal: 'environment' } }, audio: false,
-});
+setDbg([`BUILD ${BUILD}`, 'requesting camera...']);
+let stream;
+try {
+  stream = await navigator.mediaDevices.getUserMedia({
+    video: { facingMode: { ideal: 'environment' } }, audio: false,
+  });
+} catch (e) {
+  setDbg([`BUILD ${BUILD}`, 'CAMERA DENIED/FAILED:', String(e.message || e),
+          '(needs HTTPS + camera permission)']);
+  throw e;
+}
 video.srcObject = stream;
 await video.play();
+setDbg([`BUILD ${BUILD}`, 'camera ok, loading detector...']);
 
 const vw = video.videoWidth || 1280;
 const vh = video.videoHeight || 720;
@@ -112,11 +142,18 @@ const fy = fx;                         // square pixels
 const cx = PROC_W / 2, cy = PROC_H / 2;
 
 let detectorReady = false;
-const Apriltag = Comlink.wrap(new Worker('/apriltag/apriltag.js'));
-const detector = await new Apriltag(Comlink.proxy(() => { detectorReady = true; }));
-await detector.set_camera_info(fx, fy, cx, cy);
-await detector.set_tag_size(TAG_TL, TAG_SIZE_M);
-await detector.set_tag_size(TAG_TR, TAG_SIZE_M);
+let detector;
+try {
+  const Apriltag = Comlink.wrap(new Worker('/apriltag/apriltag.js'));
+  detector = await new Apriltag(Comlink.proxy(() => { detectorReady = true; }));
+  await detector.set_camera_info(fx, fy, cx, cy);
+  await detector.set_tag_size(TAG_TL, TAG_SIZE_M);
+  await detector.set_tag_size(TAG_TR, TAG_SIZE_M);
+} catch (e) {
+  setDbg([`BUILD ${BUILD}`, 'DETECTOR LOAD FAILED:', String(e.message || e),
+          '(check /apriltag/*.js + .wasm served)']);
+  throw e;
+}
 
 // Convert an AprilTag pose (OpenCV cam coords: x right, y down, z fwd) to a
 // three.js world matrix (GL coords: x right, y up, z toward viewer). The change
@@ -139,18 +176,7 @@ function poseToMatrix(R, t, out) {
   return out;
 }
 
-// ----------------------------------------------------------------- debug HUD
-// On-phone there is no console, so mirror detection state to an on-screen panel.
-const dbg = document.createElement('div');
-Object.assign(dbg.style, {
-  position:'fixed', top:'8px', left:'8px', zIndex:'1000',
-  color:'#0f0', background:'rgba(0,0,0,0.7)', padding:'8px 10px',
-  font:'12px/1.4 monospace', whiteSpace:'pre', borderRadius:'6px',
-  pointerEvents:'none', maxWidth:'70vw',
-});
-document.body.appendChild(dbg);
 let frameN = 0, lastDetN = 0;
-function setDbg(lines) { dbg.textContent = lines.join('\n'); }
 
 const grayscale = new Uint8Array(PROC_W * PROC_H);
 let busy = false;
