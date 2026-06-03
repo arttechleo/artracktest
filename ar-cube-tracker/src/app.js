@@ -28,7 +28,7 @@ const TAG_SIZE_M = 0.20;     // printed black-border size in METERS (200 mm)
 const HFOV_DEG = 60;         // camera horizontal field of view (approx)
 const PROC_W = 960;          // detector processing width (px); smaller = faster
 const LERP = 0.35;           // pose smoothing (0..1, higher = snappier lock)
-const BUILD = 'apriltag-2026-06-02-d';  // bump to confirm the live build changed
+const BUILD = 'apriltag-2026-06-02-e';  // bump to confirm the live build changed
 
 // ----------------------------------------------------------------- debug HUD
 // Created FIRST, before any await, so even an early failure is visible on phone
@@ -144,8 +144,16 @@ const cx = PROC_W / 2, cy = PROC_H / 2;
 let detectorReady = false;
 let detector;
 try {
+  // The WASM module loads ASYNCHRONOUSLY after the worker constructor returns.
+  // Comlink resolves `new Apriltag(...)` as soon as the constructor returns, so
+  // the cwrap bindings (e.g. _set_pose_info) may not exist yet. Gate all config
+  // calls on the onDetectorReady callback to avoid "_set_pose_info undefined".
+  let resolveReady;
+  const ready = new Promise((r) => { resolveReady = r; });
   const Apriltag = Comlink.wrap(new Worker('/apriltag/apriltag.js'));
-  detector = await new Apriltag(Comlink.proxy(() => { detectorReady = true; }));
+  detector = await new Apriltag(Comlink.proxy(() => { resolveReady(); }));
+  await ready;                       // WASM fully initialized + cwraps bound
+  detectorReady = true;
   await detector.set_camera_info(fx, fy, cx, cy);
   await detector.set_tag_size(TAG_TL, TAG_SIZE_M);
   await detector.set_tag_size(TAG_TR, TAG_SIZE_M);
@@ -176,7 +184,9 @@ function poseToMatrix(R, t, out) {
   return out;
 }
 
-let frameN = 0, lastDetN = 0;
+let frameN = 0, detFps = 0, lastDetT = performance.now();
+let lastDets = [];          // raw detection summaries for the HUD
+let detErr = null;
 
 const grayscale = new Uint8Array(PROC_W * PROC_H);
 let busy = false;
@@ -192,23 +202,39 @@ async function detectLoop() {
       grayscale[j] = (px[i] + px[i + 1] + px[i + 2]) / 3;
     }
     const dets = await detector.detect(grayscale, PROC_W, PROC_H);
-    lastDetN = dets.length;
+
+    // detector-loop fps (separate from render fps)
+    const now = performance.now();
+    detFps = 1000 / Math.max(1, now - lastDetT);
+    lastDetT = now;
+
     pose[TAG_TL] = pose[TAG_TR] = null;
-    const seen = [];
+    lastDets = dets.map((d) => {
+      const t = d.pose && d.pose.t;
+      return {
+        id: d.id,
+        known: (d.id === TAG_TL || d.id === TAG_TR),
+        margin: (d.decision_margin ?? d.margin),          // detector confidence
+        hamming: d.hamming,                                // bit errors corrected
+        dist: t ? Math.hypot(t[0], t[1], t[2]) : null,     // metres from camera
+        cx: d.center ? Math.round(d.center.x) : null,
+        cy: d.center ? Math.round(d.center.y) : null,
+        perr: d.pose ? d.pose.e : null,                    // pose object-space err
+      };
+    });
     for (const d of dets) {
-      seen.push(`id${d.id}`);
       if ((d.id === TAG_TL || d.id === TAG_TR) && d.pose && d.pose.R && d.pose.t) {
         pose[d.id] = { R: d.pose.R, t: d.pose.t };
-        const t = d.pose.t;
-        console.log(`[AR] RECOGNIZED tag id=${d.id} t=[${t.map(v=>v.toFixed(3))}] dist=${Math.hypot(...t).toFixed(2)}m`);
       }
     }
     if (dets.length) {
-      console.log(`[AR] frame#${frameN} detections=${dets.length} ids=${seen.join(',')}`);
+      console.log('[AR] frame#%d dets=%d %s', frameN, dets.length,
+        JSON.stringify(lastDets));
     }
+    detErr = null;
   } catch (e) {
     console.warn('[AR] detect error', e);
-    setDbg(['DETECT ERROR:', String(e)]);
+    detErr = String(e.message || e);
   } finally {
     busy = false;
   }
@@ -262,16 +288,32 @@ renderer.setAnimationLoop(() => {
 
   hint.style.display = anyVisible ? 'none' : 'block';
 
-  // live debug panel (visible on phone)
+  // ---- thorough recognition HUD (visible on phone) ----
   const tl = pose[TAG_TL], tr = pose[TAG_TR];
-  setDbg([
-    `detector: ${detectorReady ? 'READY' : 'loading...'}`,
-    `proc: ${PROC_W}x${PROC_H}  frame#${frameN}`,
-    `detections: ${lastDetN}`,
-    `TL id0: ${tl ? 'LOCK d='+Math.hypot(...tl.t).toFixed(2)+'m' : '—'}`,
-    `TR id1: ${tr ? 'LOCK d='+Math.hypot(...tr.t).toFixed(2)+'m' : '—'}`,
-    `cube: ${anyVisible ? 'VISIBLE' : 'hidden'}`,
-  ]);
+  const fmt = (n, d = 2) => (n == null ? '—' : Number(n).toFixed(d));
+  const lines = [
+    `BUILD ${BUILD}`,
+    `detector ${detectorReady ? 'READY' : '...'}  det@${detFps.toFixed(0)}fps  f#${frameN}`,
+    `proc ${PROC_W}x${PROC_H}  tag ${TAG_SIZE_M}m  hfov ${HFOV_DEG}`,
+    detErr ? `DETECT ERR: ${detErr}` : `detections: ${lastDets.length}`,
+    '─ tags seen ─',
+  ];
+  if (lastDets.length === 0) {
+    lines.push('  (none — aim closer, fill frame, avoid glare/blur)');
+  } else {
+    for (const d of lastDets) {
+      lines.push(
+        `  id${d.id}${d.known ? '*' : ' '} ` +
+        `m=${fmt(d.margin, 0)} h=${d.hamming ?? '—'} ` +
+        `d=${fmt(d.dist)}m @${d.cx},${d.cy} e=${fmt(d.perr, 4)}`
+      );
+    }
+  }
+  lines.push('─ cube lock ─');
+  lines.push(`  TL id0: ${tl ? 'LOCK d=' + fmt(Math.hypot(...tl.t)) + 'm' : '—'}`);
+  lines.push(`  TR id1: ${tr ? 'LOCK d=' + fmt(Math.hypot(...tr.t)) + 'm' : '—'}`);
+  lines.push(`  cube: ${anyVisible ? 'VISIBLE' : 'hidden'}`);
+  setDbg(lines);
 
   renderer.render(scene, camera);
 });
