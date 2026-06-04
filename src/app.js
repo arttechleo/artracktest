@@ -19,6 +19,7 @@ navigator.mediaDevices.getUserMedia = (c) => {
 };
 
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as Comlink from '/apriltag/comlink.mjs';
 
 // ----------------------------------------------------------------- tunables
@@ -54,7 +55,7 @@ const HFOV_DEG = 60;         // camera horizontal field of view (approx)
 const PROC_W = 960;          // detector processing width (px); smaller = faster
 const LERP = 0.35;           // pose smoothing (0..1, higher = snappier lock)
 const COFFIN_BIAS = 0.5;     // hero pos: 0 = plain centroid, 1 = exactly on id2 (coffin)
-const BUILD = 'apriltag-2026-06-03-n';  // bump to confirm the live build changed
+const BUILD = 'apriltag-2026-06-03-o';  // bump to confirm the live build changed
 
 // ----------------------------------------------------------------- debug HUD
 // Created FIRST, before any await, so even an early failure is visible on phone
@@ -176,8 +177,11 @@ const HERO_HEIGHT = 0.35;           // apex height in metres
 // Pluto: keep physical-up; NO spin; fixed facing = stage-forward (centroid → id2).
 // ROOT drives Pluto's bones/face via relay separately — this only sets WHERE she stands.
 // ============================================================
-function createHeroObject() {
-  // 4-radial-segment cone = square-base pyramid; cone apex defaults to +Y.
+const HERO_HEIGHT_LIFESIZE = 1.7;   // target Pluto height in metres (life-size)
+let heroLoadState = 'loading';      // 'loading' | 'pluto' | 'fallback'
+
+// gold pyramid used as fallback if the GLB fails to load.
+function makePyramidFallback() {
   const radius = HERO_BASE / Math.SQRT2;   // base edge ~= HERO_BASE
   const geo = new THREE.ConeGeometry(radius, HERO_HEIGHT, 4);
   const g = new THREE.Group();
@@ -190,6 +194,38 @@ function createHeroObject() {
     new THREE.LineBasicMaterial({ color: 0xffffff })
   ));
   return g;
+}
+
+function createHeroObject() {
+  // Empty group NOW; GLB loads async and is added as a child. Placement code
+  // drives this group's .position/.quaternion regardless of load state.
+  const group = new THREE.Group();
+  new GLTFLoader().load('/3DModel/PlutoRig_Mixamo.glb', (gltf) => {
+    const model = gltf.scene;
+    const box0 = new THREE.Box3().setFromObject(model);
+    const origH = box0.getSize(new THREE.Vector3()).y;
+    const scale = HERO_HEIGHT_LIFESIZE / origH;
+    model.scale.setScalar(scale);
+    // feet at group origin: lift so scaled bounding-box bottom sits at y=0
+    const box1 = new THREE.Box3().setFromObject(model);
+    const minY = box1.min.y;
+    if (Math.abs(minY) > 1e-3) {
+      model.position.y -= minY;
+      console.log('[HERO] feet offset applied: %.3fm (model was %s-pivoted)',
+        -minY, minY > 0 ? 'above-origin' : 'centered/below');
+    } else {
+      console.log('[HERO] pivot already at feet, no offset');
+    }
+    group.add(model);
+    heroLoadState = 'pluto';
+    console.log('[HERO] Pluto loaded  origH=%.3fm  scaledH=%.3fm  scale=%.4f',
+      origH, origH * scale, scale);
+  }, undefined, (err) => {
+    console.warn('[HERO] GLB load FAILED, pyramid fallback:', err);
+    group.add(makePyramidFallback());
+    heroLoadState = 'fallback';
+  });
+  return group;
 }
 const heroObject = createHeroObject();
 heroObject.visible = false;
@@ -385,12 +421,11 @@ const _p0 = new THREE.Vector3(), _p1 = new THREE.Vector3(); // wing world positi
 const _up = new THREE.Vector3(), _upSum = new THREE.Vector3(); // physical-up accum
 const _bx = new THREE.Vector3(), _by = new THREE.Vector3(), _bz = new THREE.Vector3();
 const _rel = new THREE.Vector3();          // hero relative to frame anchor
-const _qUp = new THREE.Quaternion(), _qSpin = new THREE.Quaternion();
 const _PLUS_Y = new THREE.Vector3(0, 1, 0);
+const _fwd = new THREE.Vector3(), _right = new THREE.Vector3(), _basis = new THREE.Matrix4();
 const _adir = new THREE.Vector3(), _atp = new THREE.Vector3(), _anrm = new THREE.Vector3();
 const _lastHero = new THREE.Vector3();     // last known hero pos for arrow guidance
 let lastHeroValid = false;
-let heroSpin = 0;                          // spin angle around physical up
 
 // ---- occlusion-resilient calibration store ----
 // hero position expressed in a tag-pair local frame, so it can be rebuilt from
@@ -492,11 +527,18 @@ renderer.setAnimationLoop(() => {
 
   if (heroPlaced && haveUp) {
     heroObject.position.copy(_hp);
-    // apex (+Y) -> physical up, then spin AROUND that up axis (not screen Y)
-    _qUp.setFromUnitVectors(_PLUS_Y, _upSum);
-    heroSpin += 0.02;
-    _qSpin.setFromAxisAngle(_upSum, heroSpin);
-    heroObject.quaternion.copy(_qSpin).multiply(_qUp);
+    // group +Y = physical up; +Z = stage-forward (hero -> id2/coffin) projected
+    // perpendicular to up. Fixed facing, camera-independent. NO spin.
+    _fwd.copy(_p2).sub(_hp);
+    _fwd.addScaledVector(_upSum, -_fwd.dot(_upSum));  // strip up component
+    if (_fwd.lengthSq() > 1e-6) {
+      _fwd.normalize();
+      _right.copy(_upSum).cross(_fwd).normalize();   // x = up × forward
+      _basis.makeBasis(_right, _upSum, _fwd);         // local +Y->up, +Z->forward
+      heroObject.quaternion.setFromRotationMatrix(_basis);
+    } else {                                          // degenerate: up-align only
+      heroObject.quaternion.setFromUnitVectors(_PLUS_Y, _upSum);
+    }
   }
   heroObject.visible = (MODE === 'HERO' && heroPlaced && haveUp);
 
@@ -534,6 +576,8 @@ renderer.setAnimationLoop(() => {
     `MODE: ${MODE}`,
     `DETECTED IDs: ${seen.length ? seen.join(' ') : '(none)'}`,
     triLine,
+    heroLoadState === 'pluto' ? 'HERO: Pluto'
+      : heroLoadState === 'fallback' ? 'HERO: pyramid fallback' : 'HERO: loading...',
     'UP: tag-derived',
     `ARROWS: ${arrowsActive} active${arrowNote ? '  (' + arrowNote + ')' : ''}`,
     `BIAS: ${COFFIN_BIAS.toFixed(2)} → coffin`,
