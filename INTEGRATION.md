@@ -1,6 +1,6 @@
 # AprilTag Stage Anchoring — Integration Guide for ROOT
 
-This document explains how the AprilTag-based spatial anchoring (repo: arttechleo/artracktest, BUILD apriltag-2026-06-03-p) integrates into ROOT's apps/audience-ar/. Written for the ROOT maintainer doing the merge.
+This document explains how the AprilTag-based spatial anchoring (repo: arttechleo/artracktest, BUILD apriltag-2026-06-03-q) integrates into ROOT's apps/audience-ar/. Written for the ROOT maintainer doing the merge.
 
 ## What this module does
 Solves WHERE Pluto stands on the physical stage using printed/projected AprilTags, replacing ROOT's "tap to PLACE" (WebXR hit-test). It does NOT touch how Pluto moves — the relay/Quest retargeting drives her bones and face. They compose:
@@ -29,9 +29,11 @@ Sketch labels are 1-indexed (C1-C9); code IDs 0-indexed (0-8). C(n) = id(n-1).
 3. Stage-forward facing: hero->id2 projected perpendicular to up. PLACEHOLDER — see Pluto facing.
 
 ## Occlusion resilience
-Detector is camera-relative. Hero position stored in a local frame anchored to id2 + one wing, rebuilt from whichever pair is live each frame — tracks as phone moves.
-Priority: 3-tag (full + recalibrate) -> id2+id0 -> id2+id1 -> lost.
-id2 (coffin) REQUIRED. Lose id2 + both wings -> hero hides.
+Detector is camera-relative. Hero position stored in a local frame anchored to a tag pair, rebuilt from whichever pair is live each frame — tracks as phone moves.
+Priority: 3-tag (full + recalibrate) -> id2+id0 -> id2+id1 -> id0+id1 -> lost.
+- id2+wing pairs span depth (coffin downstage + screen upstage) = well-conditioned.
+- id0+id1 (both screen wings) is the LAST resort: the wings are coplanar on the screen and the hero sits off that plane (at the coffin), so reconstruction is the least stable — usable to keep Pluto from vanishing when the coffin is occluded, but expect slightly more jitter. Raise LERP to smooth if needed.
+- Hero now survives losing ANY single core tag. Only hides when id2 AND both wings are lost, OR when uncalibrated.
 Needs all 3 seen once to calibrate. Show choreography: start with a beat where all 3 core tags are catchable in one frame. Recalibrates whenever all 3 return.
 
 ## Guidance arrows (id3-8)
