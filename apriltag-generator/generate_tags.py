@@ -290,13 +290,31 @@ def save_tag_pdf(path: str, img: np.ndarray, family: str, tag_id: int,
     import matplotlib.pyplot as plt
 
     side_in = size_mm / MM_PER_INCH
-    fig = plt.figure(figsize=(side_in + 1, side_in + 1.5), dpi=DEFAULT_DPI)
-    ax = fig.add_axes([0.05, 0.1, 0.9, 0.8])
+    fig_w_in = side_in + 1
+    fig = plt.figure(figsize=(fig_w_in, side_in + 1.7), dpi=DEFAULT_DPI)
+    ax = fig.add_axes([0.05, 0.16, 0.9, 0.74])
     ax.imshow(img, cmap="gray", vmin=0, vmax=255, interpolation="nearest")
     ax.axis("off")
-    fig.text(0.5, 0.95, f"id {tag_id}  {family}", ha="center",
-             fontsize=14, weight="bold")
-    fig.text(0.5, 0.04, f"print at {size_mm} mm border", ha="center", fontsize=9)
+    fig.text(0.5, 0.965, f"ID {tag_id}  ({family})  black border = {size_mm}mm",
+             ha="center", fontsize=14, weight="bold")
+    fig.text(0.5, 0.94, "VERIFY WITH RULER AFTER PRINTING", ha="center",
+             fontsize=11, color="red", weight="bold")
+    fig.text(0.5, 0.105,
+             f"The tag's OUTER BLACK BORDER must measure {size_mm} mm with a ruler.",
+             ha="center", fontsize=9)
+    fig.text(0.5, 0.085,
+             "If smaller, your printer scaled it — disable 'Fit to Page' / set 100%.",
+             ha="center", fontsize=8, color="red")
+    # printed 50 mm reference ruler (only correct if page printed at 100%)
+    RULER_MM = 50.0
+    ruler_in = RULER_MM / MM_PER_INCH
+    rw = ruler_in / fig_w_in
+    rax = fig.add_axes([0.5 - rw / 2, 0.035, rw, 0.025])
+    rax.set_xlim(0, RULER_MM); rax.set_ylim(0, 1); rax.axis("off")
+    rax.add_patch(plt.Rectangle((0, 0), RULER_MM, 1, color="black"))
+    for x in range(0, int(RULER_MM) + 1, 10):       # white 10 mm ticks
+        rax.plot([x, x], [0, 1], color="white", lw=0.8)
+    fig.text(0.5, 0.012, "↑ this bar = 50 mm exactly", ha="center", fontsize=7)
     fig.savefig(path, dpi=DEFAULT_DPI, format="pdf")
     plt.close(fig)
 
