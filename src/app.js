@@ -54,7 +54,7 @@ const HFOV_DEG = 60;         // camera horizontal field of view (approx)
 const PROC_W = 960;          // detector processing width (px); smaller = faster
 const LERP = 0.35;           // pose smoothing (0..1, higher = snappier lock)
 const COFFIN_BIAS = 0.5;     // hero pos: 0 = plain centroid, 1 = exactly on id2 (coffin)
-const BUILD = 'apriltag-2026-06-03-j';  // bump to confirm the live build changed
+const BUILD = 'apriltag-2026-06-03-k';  // bump to confirm the live build changed
 
 // ----------------------------------------------------------------- debug HUD
 // Created FIRST, before any await, so even an early failure is visible on phone
@@ -345,6 +345,11 @@ paintMode();
 const _tgt = new THREE.Matrix4();
 const _tp = new THREE.Vector3(), _tq = new THREE.Quaternion(), _ts = new THREE.Vector3();
 const _hp = new THREE.Vector3(), _p2 = new THREE.Vector3(); // hero centroid + id2 pos
+const _up = new THREE.Vector3(), _upSum = new THREE.Vector3(); // physical-up accum
+const _fwd = new THREE.Vector3();          // centroid->id2 forward reference
+const _qUp = new THREE.Quaternion(), _qSpin = new THREE.Quaternion();
+const _PLUS_Y = new THREE.Vector3(0, 1, 0);
+let heroSpin = 0;                          // spin angle around physical up
 const tracked = {}; // id -> true once first locked (skip smoothing on first frame)
 
 renderer.setAnimationLoop(() => {
@@ -392,9 +397,21 @@ renderer.setAnimationLoop(() => {
     _p2.set(t2[0], -t2[1], -t2[2]);
     _hp.lerp(_p2, COFFIN_BIAS);      // bias centroid -> id2
     heroMarker.position.copy(_hp);
-    // FORCE world-upright every frame: apex = world +Y, x/z rotation zeroed so
-    // no camera/tag/parent tilt can leak in. Only motion = gentle Y-axis spin.
-    heroMarker.rotation.set(0, heroMarker.rotation.y + 0.02, 0);
+    // PHYSICAL UP from tag poses: each vertically-mounted core tag's GL +Y axis
+    // points along real-world up. Average the visible ones -> tilt-immune apex.
+    // GL Y axis from column-major R = (-R[1][0], R[1][1], R[1][2]).
+    _upSum.set(0, 0, 0);
+    for (const id of TRI_IDS) {
+      const R = pose[id].R;
+      _up.set(-R[1][0], R[1][1], R[1][2]).normalize();
+      _upSum.add(_up);
+    }
+    _upSum.normalize();              // averaged physical up (camera-tilt removed)
+    // apex (+Y) -> physical up, then spin AROUND that up axis (not screen Y)
+    _qUp.setFromUnitVectors(_PLUS_Y, _upSum);
+    heroSpin += 0.02;
+    _qSpin.setFromAxisAngle(_upSum, heroSpin);
+    heroMarker.quaternion.copy(_qSpin).multiply(_qUp);
     triLine = 'TRIANGLE: id0 id1 id2 — centroid locked';
   } else {
     triLine = `TRIANGLE INCOMPLETE: missing ${triMissing.map((i) => 'id' + i).join(' ')}`;
@@ -413,6 +430,7 @@ renderer.setAnimationLoop(() => {
     `MODE: ${MODE}`,
     `DETECTED IDs: ${seen.length ? seen.join(' ') : '(none)'}`,
     triLine,
+    'UP: tag-derived',
     `BIAS: ${COFFIN_BIAS.toFixed(2)} → coffin`,
     '─ tags seen ─',
   ];
