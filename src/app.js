@@ -54,7 +54,7 @@ const HFOV_DEG = 60;         // camera horizontal field of view (approx)
 const PROC_W = 960;          // detector processing width (px); smaller = faster
 const LERP = 0.35;           // pose smoothing (0..1, higher = snappier lock)
 const COFFIN_BIAS = 0.5;     // hero pos: 0 = plain centroid, 1 = exactly on id2 (coffin)
-const BUILD = 'apriltag-2026-06-03-k';  // bump to confirm the live build changed
+const BUILD = 'apriltag-2026-06-03-l';  // bump to confirm the live build changed
 
 // ----------------------------------------------------------------- debug HUD
 // Created FIRST, before any await, so even an early failure is visible on phone
@@ -345,11 +345,41 @@ paintMode();
 const _tgt = new THREE.Matrix4();
 const _tp = new THREE.Vector3(), _tq = new THREE.Quaternion(), _ts = new THREE.Vector3();
 const _hp = new THREE.Vector3(), _p2 = new THREE.Vector3(); // hero centroid + id2 pos
+const _p0 = new THREE.Vector3(), _p1 = new THREE.Vector3(); // wing world positions
 const _up = new THREE.Vector3(), _upSum = new THREE.Vector3(); // physical-up accum
-const _fwd = new THREE.Vector3();          // centroid->id2 forward reference
+const _bx = new THREE.Vector3(), _by = new THREE.Vector3(), _bz = new THREE.Vector3();
+const _rel = new THREE.Vector3();          // hero relative to frame anchor
 const _qUp = new THREE.Quaternion(), _qSpin = new THREE.Quaternion();
 const _PLUS_Y = new THREE.Vector3(0, 1, 0);
 let heroSpin = 0;                          // spin angle around physical up
+
+// ---- occlusion-resilient calibration store ----
+// hero position expressed in a tag-pair local frame, so it can be rebuilt from
+// LIVE tag positions each frame (tracks as phone moves). One per wing.
+const calib = { '02': null, '12': null };  // {x,y,z} in pair-frame coords
+let hasCalib = false;
+
+// GL world position of a tag center (OpenCV cam -> GL change of basis).
+function tagPos(id, out) { const t = pose[id].t; return out.set(t[0], -t[1], -t[2]); }
+// Build an orthonormal frame anchored at P2: bx along (anchor-P2), bz ⟂ to the
+// (bx,up) plane, by completes it (~up component). Unit basis, metric coords.
+function buildFrame(P2, anchor, up) {
+  _bx.copy(anchor).sub(P2).normalize();
+  _bz.copy(_bx).cross(up).normalize();
+  _by.copy(_bz).cross(_bx);
+}
+// hero coords in current frame (call after buildFrame).
+function toFrame(hero, P2) {
+  _rel.copy(hero).sub(P2);
+  return { x: _rel.dot(_bx), y: _rel.dot(_by), z: _rel.dot(_bz) };
+}
+// rebuild hero world pos from stored coords + current live frame -> out.
+function fromFrame(P2, c, out) {
+  return out.copy(P2)
+    .addScaledVector(_bx, c.x)
+    .addScaledVector(_by, c.y)
+    .addScaledVector(_bz, c.z);
+}
 const tracked = {}; // id -> true once first locked (skip smoothing on first frame)
 
 renderer.setAnimationLoop(() => {
@@ -383,40 +413,53 @@ renderer.setAnimationLoop(() => {
     seen.push(id);
   }
 
-  // ---- HERO triangulation: centroid of coffin triangle id0+id1+id2 ----
-  const triMissing = TRI_IDS.filter((id) => !pose[id]);
-  let triLine;
-  if (triMissing.length === 0) {     // all three visible -> place marker
-    let sx = 0, sy = 0, sz = 0;
-    for (const id of TRI_IDS) {      // tag-center world pos (GL change of basis)
-      const t = pose[id].t;
-      sx += t[0]; sy += -t[1]; sz += -t[2];
-    }
-    _hp.set(sx / 3, sy / 3, sz / 3); // plain centroid
-    const t2 = pose[2].t;            // id2 (coffin) world pos
-    _p2.set(t2[0], -t2[1], -t2[2]);
-    _hp.lerp(_p2, COFFIN_BIAS);      // bias centroid -> id2
+  // ---- HERO placement w/ occlusion resilience (id2 + ≥1 wing) ----
+  // PHYSICAL UP from visible core tags' GL +Y axis (-R[1][0],R[1][1],R[1][2]).
+  const v0 = !!pose[0], v1 = !!pose[1], v2 = !!pose[2];
+  _upSum.set(0, 0, 0);
+  for (const id of TRI_IDS) {
+    if (!pose[id]) continue;
+    const R = pose[id].R;
+    _upSum.add(_up.set(-R[1][0], R[1][1], R[1][2]).normalize());
+  }
+  const haveUp = _upSum.lengthSq() > 1e-6;
+  if (haveUp) _upSum.normalize();
+
+  let heroPlaced = false, triLine;
+  if (v0 && v1 && v2) {              // FULL: place + (re)calibrate both pairs
+    tagPos(0, _p0); tagPos(1, _p1); tagPos(2, _p2);
+    _hp.copy(_p0).add(_p1).add(_p2).multiplyScalar(1 / 3);   // centroid
+    _hp.lerp(_p2, COFFIN_BIAS);                               // bias -> coffin
+    buildFrame(_p2, _p0, _upSum); calib['02'] = toFrame(_hp, _p2);
+    buildFrame(_p2, _p1, _upSum); calib['12'] = toFrame(_hp, _p2);
+    hasCalib = true;
+    heroPlaced = true;
+    triLine = 'HERO: 3-tag';
+  } else if (v2 && v0 && hasCalib && calib['02']) {   // reconstruct from id2+id0
+    tagPos(2, _p2); tagPos(0, _p0);
+    buildFrame(_p2, _p0, _upSum); fromFrame(_p2, calib['02'], _hp);
+    heroPlaced = true;
+    triLine = 'HERO: pair id2+id0';
+  } else if (v2 && v1 && hasCalib && calib['12']) {   // reconstruct from id2+id1
+    tagPos(2, _p2); tagPos(1, _p1);
+    buildFrame(_p2, _p1, _upSum); fromFrame(_p2, calib['12'], _hp);
+    heroPlaced = true;
+    triLine = 'HERO: pair id2+id1';
+  } else if (!hasCalib) {
+    triLine = 'HERO: uncalibrated, show all 3 first';
+  } else {
+    triLine = 'HERO: lost (need id2 + a wing)';
+  }
+
+  if (heroPlaced && haveUp) {
     heroMarker.position.copy(_hp);
-    // PHYSICAL UP from tag poses: each vertically-mounted core tag's GL +Y axis
-    // points along real-world up. Average the visible ones -> tilt-immune apex.
-    // GL Y axis from column-major R = (-R[1][0], R[1][1], R[1][2]).
-    _upSum.set(0, 0, 0);
-    for (const id of TRI_IDS) {
-      const R = pose[id].R;
-      _up.set(-R[1][0], R[1][1], R[1][2]).normalize();
-      _upSum.add(_up);
-    }
-    _upSum.normalize();              // averaged physical up (camera-tilt removed)
     // apex (+Y) -> physical up, then spin AROUND that up axis (not screen Y)
     _qUp.setFromUnitVectors(_PLUS_Y, _upSum);
     heroSpin += 0.02;
     _qSpin.setFromAxisAngle(_upSum, heroSpin);
     heroMarker.quaternion.copy(_qSpin).multiply(_qUp);
-    triLine = 'TRIANGLE: id0 id1 id2 — centroid locked';
-  } else {
-    triLine = `TRIANGLE INCOMPLETE: missing ${triMissing.map((i) => 'id' + i).join(' ')}`;
   }
-  heroMarker.visible = (MODE === 'HERO' && triMissing.length === 0);
+  heroMarker.visible = (MODE === 'HERO' && heroPlaced && haveUp);
 
   hint.style.display = anyVisible ? 'none' : 'block';
 
