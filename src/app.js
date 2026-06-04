@@ -57,7 +57,7 @@ const LERP = 0.35;           // pose smoothing (0..1, higher = snappier lock)
 const COFFIN_BIAS = 0.75;    // hero pos: 0 = plain centroid, 1 = exactly on id2 (coffin)
 const HERO_DROP_M = 0.40;    // metres to lower hero along physical-DOWN (-up)
 const HERO_LIFT_M = 0.10;    // metres up onto coffin lid surface (after drop)
-const BUILD = 'apriltag-2026-06-03-p';  // bump to confirm the live build changed
+const BUILD = 'apriltag-2026-06-03-q';  // bump to confirm the live build changed
 
 // ----------------------------------------------------------------- debug HUD
 // Created FIRST, before any await, so even an early failure is visible on phone
@@ -432,7 +432,7 @@ let lastHeroValid = false;
 // ---- occlusion-resilient calibration store ----
 // hero position expressed in a tag-pair local frame, so it can be rebuilt from
 // LIVE tag positions each frame (tracks as phone moves). One per wing.
-const calib = { '02': null, '12': null };  // {x,y,z} in pair-frame coords
+const calib = { '02': null, '12': null, '01': null };  // pair-frame coords
 let hasCalib = false;
 
 // GL world position of a tag center (OpenCV cam -> GL change of basis).
@@ -508,6 +508,9 @@ renderer.setAnimationLoop(() => {
     _hp.lerp(_p2, COFFIN_BIAS);                               // bias -> coffin
     buildFrame(_p2, _p0, _upSum); calib['02'] = toFrame(_hp, _p2);
     buildFrame(_p2, _p1, _upSum); calib['12'] = toFrame(_hp, _p2);
+    // wings-only fallback: anchor id0, dir id1. Store hero AND id2 (for facing).
+    buildFrame(_p0, _p1, _upSum);
+    calib['01'] = { hero: toFrame(_hp, _p0), id2: toFrame(_p2, _p0) };
     hasCalib = true;
     heroPlaced = true;
     triLine = 'HERO: 3-tag';
@@ -521,6 +524,13 @@ renderer.setAnimationLoop(() => {
     buildFrame(_p2, _p1, _upSum); fromFrame(_p2, calib['12'], _hp);
     heroPlaced = true;
     triLine = 'HERO: pair id2+id1';
+  } else if (v0 && v1 && hasCalib && calib['01']) {   // LAST resort: wings only
+    tagPos(0, _p0); tagPos(1, _p1);
+    buildFrame(_p0, _p1, _upSum);
+    fromFrame(_p0, calib['01'].hero, _hp);
+    fromFrame(_p0, calib['01'].id2, _p2);   // rebuild id2 world for facing
+    heroPlaced = true;
+    triLine = 'HERO: pair id0+id1 (coffin occluded)';
   } else if (!hasCalib) {
     triLine = 'HERO: uncalibrated, show all 3 first';
   } else {
