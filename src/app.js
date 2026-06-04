@@ -43,12 +43,12 @@ const TAG_SIZE = {            // printed black-border size in METERS, per id
   0: 0.125,     // MEASURE-ON-STAGE placeholder
   1: 0.125,     // MEASURE-ON-STAGE placeholder
   2: 0.1143,    // measured
-  3: 0.10,      // placeholder
-  4: 0.10,      // placeholder
-  5: 0.10,      // placeholder
-  6: 0.10,      // placeholder
-  7: 0.10,      // placeholder
-  8: 0.10,      // placeholder
+  3: 0.15,      // printed support tag, 150mm
+  4: 0.15,      // printed support tag, 150mm
+  5: 0.15,      // printed support tag, 150mm
+  6: 0.15,      // printed support tag, 150mm
+  7: 0.15,      // printed support tag, 150mm
+  8: 0.15,      // printed support tag, 150mm
 };
 
 const HFOV_DEG = 60;         // camera horizontal field of view (approx)
@@ -57,7 +57,7 @@ const LERP = 0.35;           // pose smoothing (0..1, higher = snappier lock)
 const COFFIN_BIAS = 0.75;    // hero pos: 0 = plain centroid, 1 = exactly on id2 (coffin)
 const HERO_DROP_M = 0.40;    // metres to lower hero along physical-DOWN (-up)
 const HERO_LIFT_M = 0.10;    // metres up onto coffin lid surface (after drop)
-const BUILD = 'apriltag-2026-06-03-q';  // bump to confirm the live build changed
+const BUILD = 'apriltag-2026-06-03-r';  // bump to confirm the live build changed
 
 // ----------------------------------------------------------------- debug HUD
 // Created FIRST, before any await, so even an early failure is visible on phone
