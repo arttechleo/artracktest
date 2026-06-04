@@ -1,60 +1,57 @@
 # AR Stage Tracking — Project Plan
 
-WebAR theater experience. Printed AprilTags as physical stage anchors, detected in-browser via WASM, Three.js renders AR content locked to tag pose. Cross-platform mobile browser (iOS + Android), no Unity at runtime.
+WebAR theater experience. Printed + projected AprilTags as physical stage anchors, detected in-browser via WASM, Three.js renders a hero asset locked to the stage. Cross-platform mobile browser, no Unity at runtime.
 
-## Current State (working)
+## WORKING (tested in previz, deployed)
 
-BUILD: `apriltag-2026-06-02-e` — live on Render, verified with printed tags.
+BUILD: `apriltag-2026-06-03-m`
 
-- AprilTag detection via arenaxr apriltag-js-standalone (WASM + worker + Comlink), vendored offline in `public/apriltag/`
-- 6DoF pose per tag, one cube locked on each tag face (full position + orientation)
-- Detects id0 (cyan) and id1 (orange)
-- Pose convert OpenCV→GL `diag(1,-1,-1)`, column-major R, verified orthonormal
-- Cube driven by position + quaternion (not raw matrix — avoids stale matrixWorld bug)
-- On-screen debug HUD + eruda mobile console: BUILD marker, detector state, fps, per-tag id/margin/hamming/dist/center/pose-err, cube lock status
-- Tag generation tool in `apriltag-generator/` (tag36h11, stage-mode boards, 300 DPI, SVG/PDF)
+- 9-tag detection (id0–8), per-ID colors + per-ID size map
+- Tag generation tool with `--ids` flag (apriltag-generator/)
+- HERO / ALL TAGS mode toggle (touch buttons, HUD)
+- Hero pyramid placed at id0/id1/id2 triangle, biased toward id2/coffin (COFFIN_BIAS=0.5)
+- Tag-derived physical-up orientation (apex points real-world up, independent of phone tilt; spin around physical-up axis)
+- Occlusion resilience: full placement on 3 tags; reconstructs from pair (id2+id0 or id2+id1) and tracks as phone moves; recalibrates whenever all 3 return
+- Guidance arrows on supporting tags id3–08 pointing toward hero; uses last-known hero position when hero fully lost
+- HUD: BUILD, MODE, DETECTED IDs, TRIANGLE/HERO state, BIAS, UP source, ARROWS count
 
-### Tunables (top of src/app.js)
-`TAG_TL=0` `TAG_TR=1` `TAG_SIZE_M=0.20` `HFOV_DEG=60` `PROC_W=960` `LERP=0.35`
+## TAG MAP
 
-### Deploy
-Render repo-root deploy. `build.js` copies index.html + src/ + public/ into dist/. Live app files: `src/app.js`, `public/apriltag/*`, `index.html`, `build.js`, `render.yaml`. Rollback snapshot on `deprecated` branch.
+| Sketch | ID | Type | Role | Size |
+|--------|-----|------|------|------|
+| C1 | 0 | perm | wing anchor (projected screen) | ~10-15cm projected, PLACEHOLDER 0.125 — MEASURE |
+| C2 | 1 | perm | wing anchor (projected screen) | ~10-15cm projected, PLACEHOLDER 0.125 — MEASURE |
+| C3 | 2 | perm | coffin front (hero anchor) | 0.1143 (4.5in) — MEASURE actual |
+| C4 | 3 | temp | support / guidance arrow | 0.10 placeholder |
+| C5 | 4 | temp | support / guidance arrow | 0.10 placeholder |
+| C6 | 5 | temp | support / guidance arrow | 0.10 placeholder |
+| C7 | 6 | temp | support / guidance arrow | 0.10 placeholder |
+| C8 | 7 | temp | support / guidance arrow | 0.10 placeholder |
+| C9 | 8 | temp | support / guidance arrow | 0.10 placeholder |
 
-## Roadmap
+id2 (coffin) is the constant anchor — required for hero placement. id0/id1 are wings. id3–08 are support + guidance.
 
-### 1. Multi-tag centroid stabilization
-- Detect all visible tags per frame, read id + pose each
-- Compute centroid of all visible tag positions → use as stage anchor point
-- Re-anchor instantly when tags appear/disappear
-- AR content positioned relative to centroid, not a single tag
+## REMAINING
 
-### 2. Fallback hierarchy
-- Fallback 1: use only remaining visible tags if some are occluded
-- Fallback 2: prioritize 2 permanent anchor tags as fixed reference
-- Fallback 3: manual "Tap to align stage" recalibration button
+### Before show (needs stage access)
+- Measure real black-border size of every printed tag → update TAG_SIZE map
+- Measure projected id0/id1 size on screen (or tag-to-tag gap) → replace 0.125 placeholder
+- Confirm core tags id0/id1/id2 mounted vertically/plumb (physical-up depends on it)
+- Measure + record each tag's physical position on stage
+- Test detection under real show lighting (spotlights, color washes, blackouts)
+- Tune COFFIN_BIAS to final value on real set
 
-### 3. Stage layout
-- Tags at stage corners (primary), sides (redundant), optional center reference
-- Map exact tag IDs → physical positions
-- Consider inverted white-on-black tags for low-light scenes
+### Content
+- Replace gold test pyramid with real hero 3D asset (GLTFLoader; keep physical-up + occlusion placement logic)
 
-### 4. Edge cases to handle
-- Actor occlusion of tags
-- Spotlight wash-out of markers
-- Motion blur from phone movement
-- iOS vs Android camera performance differences
-- Partial tag visibility
+### Venue questions (see AR_SESSION_HANDOFF.md)
+- Projected tag size, stage access for setup/tech rehearsal, lighting on tag areas, coffin position, audience device + link delivery
 
-### 5. Content
-- Replace test cubes with show AR content
-- Tie content placement to stabilized centroid anchor
+## SAFETY / DEPLOY
+- Live app = repo ROOT. Render builds `npm install; npm run build` (build.js) → dist/. dist/ gitignored, regenerated on deploy. Push src only.
+- Full pre-cleanup backup on `deprecated` branch (local + origin).
+- Workflow: build → commit → push → test on deployed mobile. eruda + HUD for on-phone debug.
+- Printable tag PNG/PDF in apriltag-generator/output/ (gitignored) — BACK THESE UP off-machine before show.
 
-## Open Decisions
-- Drop unused `vite.config.js` + `compile-targets.js` (MindAR-era leftovers)?
-- Exact stage tag layout + ID assignment
-- What AR content replaces the cubes
-
-## Constraints
-- Live indoor theater show — 5 day deadline
-- Variable lighting (spotlights, color washes)
-- Audience-operated phones, mixed devices
+## TUNABLES (top of src/app.js)
+TAG_SIZE map, COFFIN_BIAS, LERP, HFOV_DEG, PROC_W, BUILD marker, TAG_COLOR, TRI_IDS, SUPPORT_IDS
