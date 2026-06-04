@@ -54,8 +54,10 @@ const TAG_SIZE = {            // printed black-border size in METERS, per id
 const HFOV_DEG = 60;         // camera horizontal field of view (approx)
 const PROC_W = 960;          // detector processing width (px); smaller = faster
 const LERP = 0.35;           // pose smoothing (0..1, higher = snappier lock)
-const COFFIN_BIAS = 0.5;     // hero pos: 0 = plain centroid, 1 = exactly on id2 (coffin)
-const BUILD = 'apriltag-2026-06-03-o';  // bump to confirm the live build changed
+const COFFIN_BIAS = 0.75;    // hero pos: 0 = plain centroid, 1 = exactly on id2 (coffin)
+const HERO_DROP_M = 0.40;    // metres to lower hero along physical-DOWN (-up)
+const HERO_LIFT_M = 0.10;    // metres up onto coffin lid surface (after drop)
+const BUILD = 'apriltag-2026-06-03-p';  // bump to confirm the live build changed
 
 // ----------------------------------------------------------------- debug HUD
 // Created FIRST, before any await, so even an early failure is visible on phone
@@ -525,6 +527,9 @@ renderer.setAnimationLoop(() => {
     triLine = 'HERO: lost (need id2 + a wing)';
   }
 
+  // lower hero onto the coffin: net move along physical up (lift - drop)
+  if (heroPlaced && haveUp) _hp.addScaledVector(_upSum, HERO_LIFT_M - HERO_DROP_M);
+
   if (heroPlaced && haveUp) {
     heroObject.position.copy(_hp);
     // group +Y = physical up; +Z = stage-forward (hero -> id2/coffin) projected
@@ -581,6 +586,7 @@ renderer.setAnimationLoop(() => {
     'UP: tag-derived',
     `ARROWS: ${arrowsActive} active${arrowNote ? '  (' + arrowNote + ')' : ''}`,
     `BIAS: ${COFFIN_BIAS.toFixed(2)} → coffin`,
+    `DROP: ${HERO_DROP_M.toFixed(2)}  LIFT: ${HERO_LIFT_M.toFixed(2)}`,
     '─ tags seen ─',
   ];
   if (lastDets.length === 0) {
