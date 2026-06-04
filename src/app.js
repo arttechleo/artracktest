@@ -54,7 +54,7 @@ const HFOV_DEG = 60;         // camera horizontal field of view (approx)
 const PROC_W = 960;          // detector processing width (px); smaller = faster
 const LERP = 0.35;           // pose smoothing (0..1, higher = snappier lock)
 const COFFIN_BIAS = 0.5;     // hero pos: 0 = plain centroid, 1 = exactly on id2 (coffin)
-const BUILD = 'apriltag-2026-06-03-m';  // bump to confirm the live build changed
+const BUILD = 'apriltag-2026-06-03-n';  // bump to confirm the live build changed
 
 // ----------------------------------------------------------------- debug HUD
 // Created FIRST, before any await, so even an early failure is visible on phone
@@ -167,7 +167,16 @@ for (const id of TAG_IDS) {
 const TRI_IDS = [0, 1, 2];          // coffin triangle drivers (id3-8 ignored)
 const HERO_BASE = 0.25;             // base width in metres
 const HERO_HEIGHT = 0.35;           // apex height in metres
-function makeHeroPyramid() {
+
+// ============================================================
+// HERO OBJECT — SWAP POINT FOR ROOT INTEGRATION
+// Replace pyramid below with Pluto GLB via GLTFLoader.
+// Contract: return a THREE.Object3D whose +Y is "up".
+// Placement code sets .position and .quaternion every frame.
+// Pluto: keep physical-up; NO spin; fixed facing = stage-forward (centroid → id2).
+// ROOT drives Pluto's bones/face via relay separately — this only sets WHERE she stands.
+// ============================================================
+function createHeroObject() {
   // 4-radial-segment cone = square-base pyramid; cone apex defaults to +Y.
   const radius = HERO_BASE / Math.SQRT2;   // base edge ~= HERO_BASE
   const geo = new THREE.ConeGeometry(radius, HERO_HEIGHT, 4);
@@ -182,9 +191,9 @@ function makeHeroPyramid() {
   ));
   return g;
 }
-const heroMarker = makeHeroPyramid();
-heroMarker.visible = false;
-scene.add(heroMarker);
+const heroObject = createHeroObject();
+heroObject.visible = false;
+scene.add(heroObject);
 
 // --------------------------------------------------- guidance arrows id3–08
 // Bright-green 3D arrow (shaft + cone), local +Y = pointing direction, origin
@@ -482,14 +491,14 @@ renderer.setAnimationLoop(() => {
   }
 
   if (heroPlaced && haveUp) {
-    heroMarker.position.copy(_hp);
+    heroObject.position.copy(_hp);
     // apex (+Y) -> physical up, then spin AROUND that up axis (not screen Y)
     _qUp.setFromUnitVectors(_PLUS_Y, _upSum);
     heroSpin += 0.02;
     _qSpin.setFromAxisAngle(_upSum, heroSpin);
-    heroMarker.quaternion.copy(_qSpin).multiply(_qUp);
+    heroObject.quaternion.copy(_qSpin).multiply(_qUp);
   }
-  heroMarker.visible = (MODE === 'HERO' && heroPlaced && haveUp);
+  heroObject.visible = (MODE === 'HERO' && heroPlaced && haveUp);
 
   // ---- guidance arrows on supporting tags id3–08 -> hero ----
   if (heroPlaced) { _lastHero.copy(_hp); lastHeroValid = true; }
@@ -542,7 +551,7 @@ renderer.setAnimationLoop(() => {
     }
   }
   lines.push(MODE === 'HERO'
-    ? `─ hero marker: ${heroMarker.visible ? 'PLACED' : 'waiting 3 tags'} ─`
+    ? `─ hero marker: ${heroObject.visible ? 'PLACED' : 'waiting 3 tags'} ─`
     : `─ cubes locked: ${seen.length} ─`);
   setDbg(lines);
 
