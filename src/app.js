@@ -54,7 +54,7 @@ const HFOV_DEG = 60;         // camera horizontal field of view (approx)
 const PROC_W = 960;          // detector processing width (px); smaller = faster
 const LERP = 0.35;           // pose smoothing (0..1, higher = snappier lock)
 const COFFIN_BIAS = 0.5;     // hero pos: 0 = plain centroid, 1 = exactly on id2 (coffin)
-const BUILD = 'apriltag-2026-06-03-l';  // bump to confirm the live build changed
+const BUILD = 'apriltag-2026-06-03-m';  // bump to confirm the live build changed
 
 // ----------------------------------------------------------------- debug HUD
 // Created FIRST, before any await, so even an early failure is visible on phone
@@ -185,6 +185,33 @@ function makeHeroPyramid() {
 const heroMarker = makeHeroPyramid();
 heroMarker.visible = false;
 scene.add(heroMarker);
+
+// --------------------------------------------------- guidance arrows id3–08
+// Bright-green 3D arrow (shaft + cone), local +Y = pointing direction, origin
+// at the tag. Sits on a supporting tag and points toward the hero centroid so
+// a drifting user can find their way back. One per supporting id.
+const SUPPORT_IDS = [3, 4, 5, 6, 7, 8];
+const ARROW_LEN = 0.16;                     // total length in metres
+function makeArrow() {
+  const g = new THREE.Group();
+  const mat = new THREE.MeshStandardMaterial({
+    color: 0x00ff66, emissive: 0x00ff66, emissiveIntensity: 0.5,
+    roughness: 0.3, metalness: 0.3,
+  });
+  const shaftLen = ARROW_LEN * 0.6, headLen = ARROW_LEN * 0.4;
+  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, shaftLen, 12), mat);
+  shaft.position.y = shaftLen / 2;          // base at origin, grows +Y
+  const head = new THREE.Mesh(new THREE.ConeGeometry(0.025, headLen, 16), mat);
+  head.position.y = shaftLen + headLen / 2; // apex points +Y
+  g.add(shaft); g.add(head);
+  return g;
+}
+const arrows = {};
+for (const id of SUPPORT_IDS) {
+  arrows[id] = makeArrow();
+  arrows[id].visible = false;
+  scene.add(arrows[id]);
+}
 
 // ----------------------------------------------------------------- detector
 // intrinsics at PROCESSING resolution (must match the image we feed detect())
@@ -351,6 +378,9 @@ const _bx = new THREE.Vector3(), _by = new THREE.Vector3(), _bz = new THREE.Vect
 const _rel = new THREE.Vector3();          // hero relative to frame anchor
 const _qUp = new THREE.Quaternion(), _qSpin = new THREE.Quaternion();
 const _PLUS_Y = new THREE.Vector3(0, 1, 0);
+const _adir = new THREE.Vector3(), _atp = new THREE.Vector3(), _anrm = new THREE.Vector3();
+const _lastHero = new THREE.Vector3();     // last known hero pos for arrow guidance
+let lastHeroValid = false;
 let heroSpin = 0;                          // spin angle around physical up
 
 // ---- occlusion-resilient calibration store ----
@@ -461,6 +491,28 @@ renderer.setAnimationLoop(() => {
   }
   heroMarker.visible = (MODE === 'HERO' && heroPlaced && haveUp);
 
+  // ---- guidance arrows on supporting tags id3–08 -> hero ----
+  if (heroPlaced) { _lastHero.copy(_hp); lastHeroValid = true; }
+  // hero source: current if placed, else last-known (still guide the user back)
+  const haveArrowTarget = heroPlaced || lastHeroValid;
+  const arrowSrc = heroPlaced ? _hp : _lastHero;
+  let arrowsActive = 0;
+  for (const id of SUPPORT_IDS) {
+    const a = arrows[id];
+    if (MODE !== 'HERO' || !pose[id] || !haveArrowTarget) { a.visible = false; continue; }
+    tagPos(id, _atp);
+    const R = pose[id].R;                   // lift along tag face normal (GL z)
+    _anrm.set(-R[2][0], R[2][1], R[2][2]).normalize();
+    a.position.copy(_atp).addScaledVector(_anrm, 0.02);
+    _adir.copy(arrowSrc).sub(a.position);
+    if (_adir.lengthSq() < 1e-6) { a.visible = false; continue; }
+    _adir.normalize();
+    a.quaternion.setFromUnitVectors(_PLUS_Y, _adir);
+    a.visible = true;
+    arrowsActive++;
+  }
+  const arrowNote = (!heroPlaced && lastHeroValid) ? 'arrows: last-known' : null;
+
   hint.style.display = anyVisible ? 'none' : 'block';
 
   // ---- thorough recognition HUD (visible on phone) ----
@@ -474,6 +526,7 @@ renderer.setAnimationLoop(() => {
     `DETECTED IDs: ${seen.length ? seen.join(' ') : '(none)'}`,
     triLine,
     'UP: tag-derived',
+    `ARROWS: ${arrowsActive} active${arrowNote ? '  (' + arrowNote + ')' : ''}`,
     `BIAS: ${COFFIN_BIAS.toFixed(2)} → coffin`,
     '─ tags seen ─',
   ];
